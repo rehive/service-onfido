@@ -1,0 +1,32 @@
+version: '3'
+configs:
+  staging:
+    project_name: service-onfido
+    docker_image: gcr.io/rehive-services/service-onfido
+    kube_context: gke_rehive-services_europe-west4_staging3
+    cloud_provider:
+      name: gcp
+      project: rehive-services
+      kube_cluster: staging
+      region: europe-west4
+    namespace: service-onfido-staging
+    helm_values_path: ./etc/helm/staging/values.yaml
+    helm_chart: rehive/rehive-service
+    helm_chart_version: 1.0.0
+    helm_version: 3.6.3
+    use_system_helm: false
+  production:
+    project_name: service-onfido
+    docker_image: gcr.io/rehive-services/service-onfido
+    kube_context: gke_rehive-services_europe-west4_production3
+    cloud_provider:
+      name: gcp
+      project: rehive-services
+      kube_cluster: production3
+      region: europe-west4
+    namespace: service-onfido
+    helm_values_path: ./etc/helm/production/values.yaml
+    helm_chart: rehive/rehive-service
+    helm_chart_version: 1.0.0
+    helm_version: 3.6.3
+    use_system_helm: false

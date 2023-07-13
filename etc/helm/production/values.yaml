@@ -1,0 +1,103 @@
+deployment:
+  command:
+    - gunicorn
+    - "config.wsgi:application"
+  args:
+    config: file:config/gunicorn.py
+  replicaCount: 3
+  resources:
+    requests:
+      memory: 450M
+      cpu: 10m
+    limits:
+      memory: 2000Mi
+      cpu: 500m
+image:
+  pullPolicy: IfNotPresent
+  repository: gcr.io/rehive-services/service-onfido
+ingress:
+  enabled: true
+  hosts:
+  - onfido.services.rehive.io
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt
+    nginx.ingress.kubernetes.io/proxy-body-size: 20m
+  tls:
+  - hosts:
+    - onfido.services.rehive.io
+    secretName: service-onfido-tls
+postgres:
+  enabled: true
+  host: 172.26.144.2
+  port: 5432
+  db: service_onfido
+  secret:
+    key: postgres-password
+    name: postgres
+  user: service_onfido
+rabbitmq:
+  enabled: true
+  host: mini-yellow-goose.in.rmq2.cloudamqp.com
+  user: scztisej
+  vhost: scztisej
+  port: 5672
+  secret:
+    name: rabbitmq
+    key: rabbitmq-password
+service:
+  externalPort: 80
+  internalPort: 8000
+  livenessProbe:
+    httpGet:
+      path: /healthz
+      port: 8000
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 2
+  name: nginx
+  readinessProbe:
+    httpGet:
+      path: /readiness
+      port: 8000
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 2
+  type: NodePort
+serviceAccount:
+  create: true
+  annotations: 
+    iam.gke.io/gcp-service-account: "service-onfido-media@rehive-services.iam.gserviceaccount.com"
+gcloudCredentials:
+  enabled: true
+  kubernetesSecret: google-credentials-media
+redis:
+  enabled: false
+workers:
+  enabled: true
+  deployments:
+  - name: worker-general
+    internalPort: 8000
+    replicaCount: 1
+    command: [celery, -A, config.celery, worker, --loglevel=INFO, --concurrency=1,
+      --without-gossip, --without-mingle, --without-heartbeat, -Q, general-service-onfido]
+    resources:
+      requests:
+        cpu: 10m
+        memory: 150M
+      limits:
+        cpu: 500m
+        memory: 750M
+  - name: scheduler
+    internalPort: 8000
+    replicaCount: 1
+    command: [celery, -A, config.celery, worker, --beat, --loglevel=INFO, --concurrency=1,
+      --without-gossip, --without-mingle, --without-heartbeat, -Q, scheduler-service-onfido]
+    resources:
+      requests:
+        cpu: 10m
+        memory: 256M
+      limits:
+        cpu: 66m
+        memory: 256M
+

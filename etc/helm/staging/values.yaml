@@ -1,0 +1,74 @@
+deployment:
+  command:
+    - gunicorn
+    - "config.wsgi:application"
+  args:
+    config: file:config/gunicorn.py
+  replicaCount: 1
+  resources:
+    requests:
+    limits:
+image:
+  pullPolicy: IfNotPresent
+  repository: gcr.io/rehive-services/service-onfido
+ingress:
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-staging
+  enabled: true
+  hosts:
+  - onfido.s.services.rehive.io
+  tls:
+  - hosts:
+    - onfido.s.services.rehive.io
+    secretName: service-onfido-staging-tls
+postgres:
+  enabled: true
+  host: 172.30.224.3
+  port: 5432
+  db: service_onfido
+  secret:
+    key: postgres-password
+    name: postgres
+  user: service_onfido
+rabbitmq:
+  enabled: true
+  host: advanced-azure-ladybird.in.rmq2.cloudamqp.com
+  user: sxclzvgq
+  vhost: sxclzvgq
+  port: 5672
+  secret:
+    name: rabbitmq
+    key: rabbitmq-password
+service:
+  externalPort: 80
+  internalPort: 8000
+  name: nginx
+  readinessProbe:
+    httpGet:
+      path: /readiness
+      port: 8000
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 2
+  type: NodePort
+gcloudCredentials:
+  enabled: true
+  kubernetesSecret: google-credentials-media
+redis:
+  enabled: false
+workers:
+  enabled: true
+  deployments:
+  - name: worker-general
+    internalPort: 8000
+    replicaCount: 1
+    command: [celery, -A, config.celery, worker, --loglevel=INFO, --concurrency=1,
+      --without-gossip, --without-mingle, --without-heartbeat, -Q, general-service-onfido-staging]
+    resources:
+  - name: scheduler
+    internalPort: 8000
+    replicaCount: 1
+    command: [celery, -A, config.celery, worker, --beat, --loglevel=INFO, --concurrency=1,
+      --without-gossip, --without-mingle, --without-heartbeat, -Q, scheduler-service-onfido-staging]
+    resources:
