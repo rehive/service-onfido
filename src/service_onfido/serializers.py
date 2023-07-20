@@ -1,6 +1,8 @@
 import uuid
 import re
 
+from onfido.webhook_event_verifier import WebhookEventVerifier
+from onfido.exceptions import OnfidoInvalidSignatureError
 from rehive import Rehive, APIException
 from rest_framework import serializers, exceptions
 from django.db import transaction, IntegrityError
@@ -11,12 +13,8 @@ from drf_rehive_extras.serializers import (
 from drf_rehive_extras.fields import MetadataField, TimestampField, EnumField
 
 from config import settings
-from service_onfido.enums import (
-    WebhookEvent
-)
-from service_onfido.models import (
-    Company, User, PlatformWebhook
-)
+from service_onfido.enums import WebhookEvent, OnfidoDocumentType
+from service_onfido.models import Company, User, DocumentType, PlatformWebhook
 from service_onfido.authentication import HeaderAuthentication
 
 from logging import getLogger
@@ -109,6 +107,43 @@ class ActivateSerializer(serializers.Serializer):
                 company.active = True
                 company.save()
 
+        # Add required platform webhooks to service automatically.
+        platform_webhooks = [
+            {
+                "url": getattr(settings, 'BASE_URL') + 'webhook/',
+                "event": WebhookEvent.DOCUMENT_CREATE.value,
+                "secret": str(company.secret)
+            },
+            {
+                "url": getattr(settings, 'BASE_URL') + 'webhook/',
+                "event": WebhookEvent.DOCUMENT_UPDATE.value,
+                "secret": str(company.secret)
+            }
+        ]
+
+        for webhook in platform_webhooks:
+            try:
+                rehive.admin.webhooks.post(**webhook)
+            except APIException as exc:
+                if (hasattr(exc, 'data')
+                        and (GENERAL_DUPLICATE_EXC in exc.data['message']
+                        or WEBHOOK_DUPLICATE_EXC in exc.data['message'])):
+                    # The webhook already exists, ignore this error.
+                    pass
+                else:
+                    raise serializers.ValidationError(
+                        {"non_field_errors":
+                            ["Unable to configure event webhooks."]
+                        }
+                    )
+
+        # TODO
+        # Add required onfido webhooks to service automatically.
+        onfido_webhooks = []
+
+        for webhook in onfido_webhooks:
+            continue
+
         return company
 
 
@@ -198,6 +233,80 @@ class WebhookSerializer(serializers.Serializer):
         return validated_data
 
 
+class OnfidoWebhookSerializer(serializers.Serializer):
+    payload = serializers.JSONField()
+
+    def validate(self, validated_data):
+        # Get the payload so we can find the correct secret tooken for the
+        # registered webhook.
+        payload = validated_data.get("payload")
+
+        # Get the signature from the headers.
+        signature = self.context['request'].META.get('HTTP_X_SHA2_SIGNATURE')
+
+        # Check if it is a valid company that is properly configured.
+        try:
+            company = Company.objects.get(
+                identifier=self.context.get('view').kwargs.get('company_id')
+            )
+        except Company.DoesNotExist:
+            raise serializers.ValidationError(
+                {"non_field_errors": ["Invalid company."]}
+            )
+
+        if not company.configured:
+            raise serializers.ValidationError(
+                {'non_field_errors': ["The company is improperly configured."]}
+            )
+
+        # TODO
+        # Retrieve a secret token for the specific webhook event registered in
+        # Onfido.
+        try:
+            secret_token = company.onfidowebhooks.get(
+                event=payload.get("action")
+            ).secret_token
+        except OnfidoWebhook.DoesNotExist:
+            raise serializers.ValidationError(
+                {'non_field_errors': [
+                    "The event is not registered for this company."
+                ]}
+            )
+
+        # Create an instance of the Onfido webhook verifier.
+        verifier = WebhookEventVerifier(secret_token)
+
+        # Read and verify the signature using the raw request body.
+        try:
+            event = verifier.read_payload(
+                self.context['request'].raw_body, signature
+            )
+        except ValueError:
+            raise serializers.ValidationError(
+                {'non_field_errors': ["Invalid payload."]}
+            )
+        except OnfidoInvalidSignatureError:
+            raise serializers.ValidationError(
+                {'non_field_errors': ["Invalid signature."]}
+            )
+
+        return validated_data
+
+    def create(self, validated_data):
+        payload = validated_data.get("payload")
+
+        # Perform necessary functionality based on the payload action.
+        if payload.get("action") == "":
+
+            # Find the document in the document resource.
+
+            # Update the document on rehive with status, metadata and note.
+
+            pass
+
+        return validated_data
+
+
 # User
 
 class CompanySerializer(BaseModelSerializer):
@@ -218,3 +327,29 @@ class AdminCompanySerializer(CompanySerializer):
         model = Company
         fields = ('id', 'secret',)
         read_only_fields = ('id', 'secret',)
+
+
+class AdminDocumentTypeSerializer(BaseModelSerializer):
+    id = serializers.CharField(read_only=True, source='identifier')
+    onfido_type = EnumField(enum=OnfidoDocumentType)
+    created = TimestampField(read_only=True)
+    updated = TimestampField(read_only=True)
+
+    class Meta:
+        model = DocumentType
+        fields = (
+            'id',
+            'rehive_type',
+            'onfido_type',
+            'created',
+            'updated',
+        )
+        read_only_fields = (
+            'id',
+            'created',
+            'updated',
+        )
+
+    def validate(self, validated_data):
+        validated_data["company"] = self.context.get('request').user.company
+        return validated_data

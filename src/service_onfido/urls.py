@@ -10,10 +10,28 @@ urlpatterns = (
     re_path(r'^deactivate/$', views.DeactivateView.as_view(), name='deactivate'),
     re_path(r'^webhook/$', views.WebhookView.as_view(), name='webhook'),
 
+    # Onfido webhooks
+    re_path(
+        r'^onfido/webhook/(?P<company_id>\w+)/$',
+        views.OnfidoWebhookView.as_view(),
+        name='onfido-webhook-view'
+    ),
+
     # Admin
     re_path(
         r'^admin/company/$',
-        views.AdminCompanyView.as_view(), name='admin-company-view'
+        views.AdminCompanyView.as_view(),
+        name='admin-company-view'
+    ),
+    re_path(
+        r'^admin/document-types/$',
+        views.AdminListDocumentTypeView.as_view(),
+        name='admin-document-type-list'
+    ),
+    re_path(
+        r'^admin/document-types/(?P<identifier>([a-zA-Z0-9\_\-]+))/$',
+        views.AdminDocumentTypeView.as_view(),
+        name='admin-documen-type-view'
     ),
 )
 
