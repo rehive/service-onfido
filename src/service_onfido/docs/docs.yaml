@@ -1,0 +1,27 @@
+service_onfido.views.ActivateView:
+    POST:
+        summary: Activate service
+service_onfido.views.DeactivateView:
+    POST:
+        summary: Deactivate service
+service_onfido.views.WebhookView:
+    POST:
+        summary: Receive Platform webhook
+service_onfido.views.OnfidoWebhookView:
+    POST:
+        summary: Receive Onfido webhook
+service_onfido.views.AdminCompanyView:
+    GET:
+        summary: Retrieve company
+    PUT:
+        summary: Update company
+    PATCH:
+        summary: Partially update company
+service_onfido.views.AdminListDocumentTypeView:
+    GET:
+        summary: List document types
+    POST:
+        summary: Create document type
+service_onfido.views.AdminDocumentTypeView:
+    GET:
+        summary: Retrieve document type

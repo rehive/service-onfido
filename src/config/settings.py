@@ -15,7 +15,7 @@ import os
 
 from .plugins.secrets import *
 from .plugins.rest_framework import *
-from .plugins.yasg import *
+from .plugins.spectacular import *
 from .plugins.database import *
 from .plugins.tasks import *
 from .plugins.sentry import *
@@ -25,12 +25,11 @@ from .plugins.healthz import *
 
 
 # LOGGING
-# ---------------------------------------------------------------------------------------------------------------------#
+# ------------------------------------------------------------------------------
 logger = getLogger('django')
 
-
 # Project paths
-# ---------------------------------------------------------------------------------------------------------------------#
+# ------------------------------------------------------------------------------
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROJECT_DIR = os.path.abspath(os.path.join(BASE_DIR, '..'))
@@ -38,7 +37,7 @@ PROJECT_DIR = os.path.abspath(os.path.join(BASE_DIR, '..'))
 ALLOWED_HOSTS = ['*']
 
 # Installed apps
-# ---------------------------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -52,17 +51,17 @@ INSTALLED_APPS = [
     'corsheaders',
     'rest_framework',
     'rest_framework.authtoken',
-    'drf_yasg',
     'healthz',
     'drf_rehive_extras',
     'django_rehive_extras',
+    'drf_spectacular',
+    'drf_spectacular_sidecar',
 
     'service_onfido',
 ]
 
 # Middleware
-# ---------------------------------------------------------------------------------------------------------------------
-
+# ------------------------------------------------------------------------------
 MIDDLEWARE = [
     'healthz.middleware.HealthCheckMiddleware',
     'corsheaders.middleware.CorsMiddleware',
@@ -76,16 +75,17 @@ MIDDLEWARE = [
     'django.middleware.locale.LocaleMiddleware',
 ]
 
-INTERNAL_IPS = ['127.0.0.1']
+# AutoField
+# ------------------------------------------------------------------------------
+DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
 
-ROOT_URLCONF = 'config.urls'
-
-WSGI_APPLICATION = 'config.wsgi.application'
+# CORS headers
+# ------------------------------------------------------------------------------
+CORS_ALLOW_ALL_ORIGINS = True
 
 # Password validation
-# ---------------------------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # https://docs.djangoproject.com/en/1.9/ref/settings/#auth-password-validators
-
 AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
@@ -96,9 +96,8 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 # Internationalization
-# ---------------------------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # https://docs.djangoproject.com/en/1.9/topics/i18n/
-
 LANGUAGE_CODE = 'en'
 
 TIME_ZONE = 'UTC'
@@ -110,9 +109,8 @@ USE_L10N = True
 USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
-# ---------------------------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # https://docs.djangoproject.com/en/1.9/howto/static-files/
-
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(PROJECT_DIR, 'var/www/static')
 
@@ -124,14 +122,22 @@ STATICFILES_DIRS = [
     # '/var/www/static/',
 ]
 
+# Media files
+# ------------------------------------------------------------------------------
+# The max amount of memory a file upload can use before getting moved into a
+# temporary file.
+# 5MB - 5242880
+# 10MB - 10485760
+# 20MB - 20971520.
+FILE_UPLOAD_MAX_MEMORY_SIZE = 5242880
+
 MEDIA_URL = '/media/'
+
 MEDIA_ROOT = os.path.join(PROJECT_DIR, 'var/www/media')
 
-
 # Template files
-# ---------------------------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # https://docs.djangoproject.com/en/dev/howto/static-files/
-
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
@@ -155,7 +161,13 @@ TEMPLATES = [
 ]
 
 # Other
-# ---------------------------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+INTERNAL_IPS = ['127.0.0.1']
+
+ROOT_URLCONF = 'config.urls'
+
+WSGI_APPLICATION = 'config.wsgi.application'
+
 VERSION = '1.0.0'
 
 SITE_ID = 1
@@ -164,10 +176,14 @@ FIXTURE_DIRS = ['config/fixtures']
 
 CACHE_DIR = os.path.join(PROJECT_DIR, 'var/cache')
 
+# Docs
+# ------------------------------------------------------------------------------
+ADDITIONAL_DOCS_DIRS = [
+    os.path.join(BASE_DIR, "service_onfido/docs/")
+]
 
 # Logging
-# ---------------------------------------------------------------------------------------------------------------------
-
+# ------------------------------------------------------------------------------
 from django.utils.log import DEFAULT_LOGGING
 
 LOGGING = {
@@ -196,5 +212,3 @@ LOGGING = {
         'django.server': DEFAULT_LOGGING['loggers']['django.server'],
     },
 }
-
-DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'

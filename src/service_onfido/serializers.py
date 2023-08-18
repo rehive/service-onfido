@@ -7,9 +7,7 @@ from rehive import Rehive, APIException
 from rest_framework import serializers, exceptions
 from django.db import transaction, IntegrityError
 from django.utils.translation import gettext_lazy as _
-from drf_rehive_extras.serializers import (
-    BaseModelSerializer, DestroyModelSerializer
-)
+from drf_rehive_extras.serializers import BaseModelSerializer
 from drf_rehive_extras.fields import MetadataField, TimestampField, EnumField
 
 from config import settings
@@ -21,7 +19,6 @@ from logging import getLogger
 
 
 logger = getLogger('django')
-
 
 # Exceptions messages from rehive.
 GENERAL_DUPLICATE_EXC = "Duplicate key value violates unique constraint"
@@ -174,9 +171,13 @@ class DeactivateSerializer(serializers.Serializer):
 
         return validated_data
 
-    def delete(self):
-        company = self.validated_data['company']
-        purge = self.validated_data.get('purge', False)
+    def create(self, validated_data):
+        """
+        Modify the create to deactivate the company.
+        """
+
+        company = validated_data.get('company')
+        purge = validated_data.get('purge', False)
         if purge is True:
             company.delete()
             return
@@ -184,6 +185,8 @@ class DeactivateSerializer(serializers.Serializer):
         company.admin.token = None
         company.save()
         company.admin.save()
+
+        return validated_data
 
 
 class WebhookSerializer(serializers.Serializer):

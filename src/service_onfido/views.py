@@ -7,6 +7,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.parsers import BaseParser, ParseError
 from rest_framework.renderers import JSONRenderer
 from drf_rehive_extras.generics import *
+from drf_rehive_extras.serializers import ActionResponseSerializer
 
 from config import settings
 from service_onfido.authentication import *
@@ -42,29 +43,31 @@ class RawJSONParser(BaseParser):
 Activation Endpoints
 """
 
-class ActivateView(CreateAPIView):
-    permission_classes = (AllowAny, )
+class ActivateView(ActionAPIView):
+    authentication_classes = ()
+    permission_classes = (AllowAny,)
     serializer_class = ActivateSerializer
+    serializer_classes = {
+        "POST": (ActivateSerializer, ActionResponseSerializer,)
+    }
 
 
-class DeactivateView(CreateAPIView):
-    permission_classes = (AllowAny, )
+class DeactivateView(ActionAPIView):
+    authentication_classes = ()
+    permission_classes = (AllowAny,)
     serializer_class = DeactivateSerializer
-
-    def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        serializer.delete()
-        return Response({'status': 'success'})
+    serializer_classes = {
+        "POST": (DeactivateSerializer, ActionResponseSerializer,)
+    }
 
 
-class WebhookView(CreateAPIView):
-    """
-    Rehive platform webhooks.
-    """
-
+class WebhookView(ActionAPIView):
+    authentication_classes = ()
     permission_classes = (AllowAny,)
     serializer_class = WebhookSerializer
+    serializer_classes = {
+        "POST": (WebhookSerializer, ActionResponseSerializer,)
+    }
 
 
 class OnfidoWebhookView(CreateAPIView):
@@ -72,8 +75,12 @@ class OnfidoWebhookView(CreateAPIView):
     Onfido webhooks.
     """
 
+    authentication_classes = ()
     permission_classes = (AllowAny,)
     serializer_class = OnfidoWebhookSerializer
+    serializer_classes = {
+        "POST": (OnfidoWebhookSerializer, ActionResponseSerializer,)
+    }
     parser_classes = (RawJSONParser,)
 
 
@@ -94,6 +101,9 @@ class AdminListDocumentTypeView(ListCreateAPIView):
     authentication_classes = (AdminAuthentication,)
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return DocumentType.objects.none()
+
         return DocumentType.objects.filter(
             company=self.request.user.company
         ).order_by('-created')
