@@ -1,4 +1,4 @@
-# Onfid Service
+# Onfido Service
 
 A service to handle Onfido KYC.
 
@@ -6,7 +6,6 @@ Requires the following permissions in Rehive:
 
 permissions |
 ---|
-
 
 
 ## Getting started
