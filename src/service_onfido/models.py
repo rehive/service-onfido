@@ -6,6 +6,8 @@ from logging import getLogger
 from decimal import Decimal
 from datetime import timedelta
 
+import onfido
+from onfido.exceptions import OnfidoInvalidSignatureError
 from enumfields import EnumField
 from rehive import Rehive, APIException
 from django.db import models, transaction, IntegrityError
@@ -105,31 +107,12 @@ class PlatformWebhook(DateModel):
 
         try:
             if self.event == WebhookEvent.DOCUMENT_CREATE:
+                Document.objects.create_from_event(
+                    self.company, self.data
+                )
 
-                # TODO
-
-                # Find if there is a mapping for the document.
-
-                # Try and get an applicant ID (create one on onfido if necessary)
-                # Ensure a location is provided?
-
-                # For Prood of Address get a country issueing number
-
-                # Check if it is a multi side document (
-                # how do we know which side is getting uploaded
-                # )
-                # Maybe the document-type mapping should include an additional side field.
-
-                # Upload the document and get an ID from onfido
-
-                # Store the document in Document, with the correct types.
-
-                # Update the document on rehive with metadata.
-
-
-                pass
-            elif self.event == WebhookEvent.DOCUMENT_UPDATE:
-                pass
+            # elif self.event == WebhookEvent.DOCUMENT_UPDATE:
+            #     pass
 
         except Exception as exc:
             self.failed = now() if self.tries > self.MAX_RETRIES else None
@@ -152,15 +135,15 @@ class DocumentType(DateModel):
     )
     # Rehive document types are custom per company, hence the need for a
     # mapping model like this.
-    rehive_type = models.CharField(max_length=64)
+    platform_type = models.CharField(max_length=64)
     # Onfido documents are always one of a known list (enum).
     onfido_type = EnumField(OnfidoDocumentType, max_length=100)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=['company', 'rehive_type',],
-                name='document_type_unique_company_rehive_type'
+                fields=['company', 'platform_type',],
+                name='document_type_unique_company_platform_type'
             ),
             models.UniqueConstraint(
                 fields=['company', 'onfido_type',],
@@ -170,6 +153,61 @@ class DocumentType(DateModel):
 
     def __str__(self):
         return str(self.identifier)
+
+
+class DocumentManager(models.Manager):
+
+    def create_from_event(self, company, data):
+        # Ensure the event data has the necessary fields.
+        try:
+            document_id = data["id"]
+            platform_user = data["user"]
+            platform_type = data["type"]
+        except KeyError:
+            raise ValueError("Invalid document event data.")
+
+        # Find a document type using the event data.
+        try:
+            document_type = DocumentType.objects.get(
+                platform_type=platform_type["id"], company=company
+            )
+        except DocumentType.DoesNotExist:
+            raise ValueError("A document type mapping has not been configured.")
+
+        # Find (or create) a user using the event data.
+        user, created = User.objects.get_or_create(
+            identifier=uuid.UUID(platform_user['id']), company=company
+        )
+        # Ensure a customer ID exists on the user.
+        user.generate_onfido_customer()
+
+        # Instantiate the Onfido API.
+        onfido_api = onfido.Api(company.onfido_api_key)
+        # Generate a file to upload.
+        request_file = open("sample_document.png", "rb")
+        # Upload the document to the Onfido servers.
+        onfido_document = onfido_api.document.upload(
+            request_file,
+            {
+                "applicant_id": user.onfido_customer_id,
+                "type": document_type.onfido_type
+            }
+        )
+
+        # Create the document in this service.
+        return self.create(
+            user=user,
+            platform_id=document_id,
+            onfido_id=onfido_document["id"],
+            type=document_type
+        )
+
+        # Post process: Apply metadata to the platform document.
+        # Post process: Generate an onfido check.
+
+    # TODO
+    # Check if it is a multi side document
+    # Maybe the document-type mapping should include an additional side field.
 
 
 class Document(DateModel):
@@ -182,17 +220,19 @@ class Document(DateModel):
         related_name='documents',
         on_delete=models.CASCADE
     )
-    rehive_id = models.CharField(max_length=64)
+    platform_id = models.CharField(max_length=64)
     onfido_id = models.CharField(max_length=64)
     type = models.ForeignKey(
         'service_onfido.DocumentType', on_delete=models.CASCADE
     )
 
+    objects = DocumentManager()
+
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=['user', 'rehive_id',],
-                name='document_unique_user_rehive_id'
+                fields=['user', 'platform_id',],
+                name='document_unique_user_platform_id'
             ),
             models.UniqueConstraint(
                 fields=['user', 'onfido_id',],
@@ -204,12 +244,16 @@ class Document(DateModel):
         return str(self.identifier)
 
     @property
-    def rehive_resource(self):
+    def platform_resource(self):
         """
-        Get the resource directly from rehive.
+        Get the resource directly from platform.
         """
 
-        return None
+        rehive = Rehive(self.user.company.admin.token)
+
+        resource = rehive.admin.users.documents.get(self.platform_id)
+
+        return resource
 
     @property
     def onfido_resource(self):
@@ -217,9 +261,13 @@ class Document(DateModel):
         Get the resource directly from onfido.
         """
 
-        return None
+        onfido_api = onfido.Api(self.user.company.onfido_api_key)
 
-    def update_on_rehive(self, data):
+        resource = onfido_api.document.find(self.onfido_id)
+
+        return resource
+
+    def update_on_platform(self, data):
         pass
 
     def update_on_onfido(self, data):
