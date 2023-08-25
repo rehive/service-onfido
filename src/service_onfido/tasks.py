@@ -34,3 +34,54 @@ def process_platform_webhook(self, webhook_id):
             )
         except PlatformWebhookProcessingError:
             logger.info("Platform webhook exceeded max retries.")
+
+
+@shared_task(acks_late=True, bind=True, default_retry_delay=60)
+def process_document(self, document_id):
+    """
+    Task for processing documents.
+    """
+
+    from service_onfido.models import Document
+
+    try:
+        document = Document.objects.get(id=document_id)
+    except Document.DoesNotExist:
+        logger.error('Document does not exist.')
+        return
+
+    document.process()
+
+
+@shared_task(acks_late=True, bind=True, default_retry_delay=60)
+def generate_check(self, check_id):
+    """
+    Task for generating checks.
+    """
+
+    from service_onfido.models import Check
+
+    try:
+        check = Check.objects.get(id=check_id)
+    except Check.DoesNotExist:
+        logger.error('Check does not exist.')
+        return
+
+    check.generate()
+
+
+@shared_task(acks_late=True, bind=True, default_retry_delay=60)
+def evaluate_check(self, check_id):
+    """
+    Task for evaluating checks.
+    """
+
+    from service_onfido.models import Check
+
+    try:
+        check = Check.objects.get(id=check_id)
+    except Check.DoesNotExist:
+        logger.error('Check does not exist.')
+        return
+
+    check.evaluate()

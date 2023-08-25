@@ -16,10 +16,13 @@ from django.utils.functional import cached_property
 from django.utils.timezone import now
 from django.contrib.postgres.fields import ArrayField
 from django_rehive_extras.models import DateModel
+from django.utils.functional import cached_property
 
 from config import settings
 from service_onfido.exceptions import PlatformWebhookProcessingError
-from service_onfido.enums import WebhookEvent, OnfidoDocumentType
+from service_onfido.enums import (
+    WebhookEvent, OnfidoDocumentType, CheckStatus, DocumentStatus
+)
 from service_onfido.utils.common import (
     get_unique_filename, to_cents, truncate, from_cents
 )
@@ -61,7 +64,7 @@ class User(DateModel):
     company = models.ForeignKey(
         'service_onfido.Company', null=True, on_delete=models.CASCADE,
     )
-    onfido_customer_id = models.CharField(
+    onfido_id = models.CharField(
         unique=True, max_length=64, null=True
     )
 
@@ -70,10 +73,66 @@ class User(DateModel):
 
     @property
     def configured(self):
-        if (self.onfido_customer_id):
+        if (self.onfido_id):
             return True
 
         return False
+
+    @cached_property
+    def platform_resource(self):
+        """
+        Get the resource directly from platform.
+        """
+
+        rehive = Rehive(self.company.admin.token)
+
+        resource = rehive.admin.users.documents.get(self.identifier)
+
+        return resource
+
+    @cached_property
+    def onfido_resource(self):
+        """
+        Get the resource directly from onfido.
+        """
+
+        if not self.onfido_id:
+            raise Exception("Improperly configured user")
+
+        if not self.company.configured:
+            raise Exception("Improperly configured company.")
+
+        onfido_api = onfido.Api(self.company.onfido_api_key)
+
+        resource = onfido_api.applicant.find(self.onfido_id)
+
+        return resource
+
+    def generate_onfido_applicant(self):
+        """
+        Generate a customer on onfido.
+        """
+
+        if self.onfido_id:
+            return
+
+        if not self.company.configured:
+            raise Exception("Improperly configured company.")
+
+        onfido_api = onfido.Api(self.company.onfido_api_key)
+
+        # Create customer on onfido.
+        applicant = api.applicant.create({
+            # TODO : Populate with the correct values.
+            # Can default to dummy values as well.
+            "first_name": "Jane",
+            "last_name": "Doe",
+            #"dob": "1984-01-01",
+            #"address": {}
+        })
+
+        self.onfido_id = applicant["id"]
+        self.save()
 
 
 class PlatformWebhook(DateModel):
@@ -107,10 +166,11 @@ class PlatformWebhook(DateModel):
 
         try:
             if self.event == WebhookEvent.DOCUMENT_CREATE:
-                Document.objects.create_from_event(
+                Document.objects.create_from_platform_event(
                     self.company, self.data
                 )
-
+            # TODO : Add functionality to override statuses OR withdraw checks
+            # if the status is updated directly in the platform.
             # elif self.event == WebhookEvent.DOCUMENT_UPDATE:
             #     pass
 
@@ -157,7 +217,10 @@ class DocumentType(DateModel):
 
 class DocumentManager(models.Manager):
 
-    def create_from_event(self, company, data):
+    def create_from_platform_event(self, company, data):
+        if not company.configured:
+            raise Exception("Improperly configured company.")
+
         # Ensure the event data has the necessary fields.
         try:
             document_id = data["id"]
@@ -178,8 +241,8 @@ class DocumentManager(models.Manager):
         user, created = User.objects.get_or_create(
             identifier=uuid.UUID(platform_user['id']), company=company
         )
-        # Ensure a customer ID exists on the user.
-        user.generate_onfido_customer()
+        # Generate an onfido applicant.
+        user.generate_onfido_applicant()
 
         # Instantiate the Onfido API.
         onfido_api = onfido.Api(company.onfido_api_key)
@@ -189,7 +252,7 @@ class DocumentManager(models.Manager):
         onfido_document = onfido_api.document.upload(
             request_file,
             {
-                "applicant_id": user.onfido_customer_id,
+                "applicant_id": user.onfido_id,
                 "type": document_type.onfido_type
             }
         )
@@ -202,28 +265,25 @@ class DocumentManager(models.Manager):
             type=document_type
         )
 
-        # Post process: Apply metadata to the platform document.
-        # Post process: Generate an onfido check.
-
-    # TODO
-    # Check if it is a multi side document
-    # Maybe the document-type mapping should include an additional side field.
-
 
 class Document(DateModel):
     """
     Map Rehive documents to onfido documents.
     """
 
+    identifier = models.UUIDField(unique=True, default=uuid.uuid4)
     user = models.ForeignKey(
         'service_onfido.User',
-        related_name='documents',
+        related_name='user_documents',
         on_delete=models.CASCADE
     )
     platform_id = models.CharField(max_length=64)
     onfido_id = models.CharField(max_length=64)
     type = models.ForeignKey(
         'service_onfido.DocumentType', on_delete=models.CASCADE
+    )
+    status = EnumField(
+        DocumentStatus, max_length=50, default=DocumentStatus.PENDING
     )
 
     objects = DocumentManager()
@@ -243,7 +303,7 @@ class Document(DateModel):
     def __str__(self):
         return str(self.identifier)
 
-    @property
+    @cached_property
     def platform_resource(self):
         """
         Get the resource directly from platform.
@@ -255,11 +315,17 @@ class Document(DateModel):
 
         return resource
 
-    @property
+    @cached_property
     def onfido_resource(self):
         """
         Get the resource directly from onfido.
         """
+
+        if not self.onfido_id:
+            raise Exception("Improperly configured document.")
+
+        if not self.user.company.configured:
+            raise Exception("Improperly configured company.")
 
         onfido_api = onfido.Api(self.user.company.onfido_api_key)
 
@@ -267,8 +333,143 @@ class Document(DateModel):
 
         return resource
 
-    def update_on_platform(self, data):
-        pass
+    def transition_async(self, status):
+        """
+        Process the status async.
+        """
 
-    def update_on_onfido(self, data):
-        pass
+        tasks.transition_document.delay(self.id, status)
+
+    def transition(self, status):
+        """
+        Transition the status of the document.
+        """
+
+        if self.status == status:
+            return
+
+        rehive = Rehive(self.user.company.admin.token)
+
+        # TODO : transition to PENDING and populate metadata.
+        if status in (DocumentStatus.PENDING,):
+            # Update on the platform.
+            rehive.admin.users.documents.patch(
+                self.platform_id,
+                metadata={
+                    "service_onfido": {
+                        "document": {
+                            "id": self.onfido_id,
+                            "applicant_id": self.user.onfido_id,
+                        }
+                    }
+                }
+            )
+
+        # TODO : Add the document to a check
+
+        # If final status is changed, modify on the platform.
+        if status in (DocumentStatus.VERIFIED, DocumentStatus.FAILED):
+            # Update on the platform.
+            rehive.admin.users.documents.patch(
+                self.platform_id, status=status.value
+            )
+
+        # Update the document status.
+        self.status = status
+        self.save()
+
+
+class Check(DateModel):
+    """
+    Map checks to onfido checks.
+
+    Compiles multiple documents into a check that can be processed later.
+    """
+
+    identifier = models.UUIDField(unique=True, default=uuid.uuid4)
+    user = models.ForeignKey(
+        'service_onfido.User',
+        related_name='documents',
+        on_delete=models.CASCADE
+    )
+    onfido_id = models.CharField(max_length=64)
+    # List of reports that should be done.
+    reports = ArrayField(models.CharField(max_length=64), size=20)
+    # List of documents that should be reported on.
+    # TODO : Do we want to limit the number of documents accepted.
+    documents = models.ManyToManyField('service_onfido.Document')
+    status = EnumField(
+        CheckStatus, max_length=50, default=CheckStatus.PENDING
+    )
+
+    def __str__(self):
+        return str(self.identifier)
+
+    def generate_async(self):
+        """
+        Generate the check async.
+        """
+
+        tasks.generate_check.delay(self.id)
+
+    def generate(self):
+        """
+        Generate the check by creating it in onfido.
+        """
+
+        if self.onfido_id:
+            raise Exception("Check has already been generated.")
+
+        if not self.user.company.configured:
+            raise Exception("Improperly configured company.")
+
+        # Change status of this check
+        self.status = CheckStatus.PROCESSING
+        self.save()
+
+        onfido_api = onfido.Api(self.user.company.onfido_api_key)
+
+        # Generate the check.
+        check = api.check.create({
+            "applicant_id": self.user.onfido_id,
+            "report_names": self.reports,
+            "document_ids": [d.onfido_id for d in self.documents.all()]
+        })
+
+        self.onfido_id = check["id"]
+        self.save()
+
+    def evaluate_async(self):
+        """
+        Evaluate a check async.
+        """
+
+        tasks.evaluate_check.delay(self.id)
+
+    def evaluate(self):
+        """
+        Evaluate a check after it is updated on Onfido.
+        """
+
+        if self.onfido_id:
+            raise Exception(
+                "Cannot evaluate a check that has not been generated."
+            )
+
+        if not self.user.company.configured:
+            raise Exception("Improperly configured company.")
+
+        onfido_api = onfido.Api(self.user.company.onfido_api_key)
+
+        reports = onfido_api.report.all(self.onfido_id)
+
+        # Iterate through reports dealing with each type individually.
+        for r in reports["reports"]:
+            # Handle the `document` type report.
+            if r["name"] == "document":
+                if r["result"] == "clear":
+                    for d in self.documents.all():
+                        d.transition(DocumentStatus.VERIFIED)
+                else:
+                    for d in self.documents.all():
+                        d.transition(DocumentStatus.FAILED)

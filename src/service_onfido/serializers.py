@@ -293,19 +293,29 @@ class OnfidoWebhookSerializer(serializers.Serializer):
                 {'non_field_errors': ["Invalid signature."]}
             )
 
+        # TODO : Add company into validated_data
+
         return validated_data
 
     def create(self, validated_data):
         payload = validated_data.get("payload")
+        company = validated_data.get("company")
 
         # Perform necessary functionality based on the payload action.
-        if payload.get("action") == "":
-
-            # Find the document in the document resource.
-
-            # Update the document on rehive with status, metadata and note.
-
-            pass
+        if payload.get("action") in ("check.completed", "check.withdrawn",):
+            try:
+                check = Check.objects.get(
+                    onfido_id=payload["object"]["id"],
+                    user__company=company
+                )
+            # The check does not exist in the database, ignore it.
+            except Check.DoesNotExist:
+                logger.error(
+                    "Check does not exist: {}.".format(payload["object"]["id"])
+                )
+            # Evaluate the check
+            else:
+                check.evaluate_async()
 
         return validated_data
 

@@ -14,5 +14,12 @@ class OnfidoDocumentType(Enum):
     VOTER_ID = 'voter_id'
     WORK_PERMIT = 'work_permit'
     # TODO : Do we want to support UNKNOWN in some way?
+    # TODO : There are clearly more types, Onfido just documents them badly.
 
-    # TODO : There are clearly more types, Onfido just sucks at documenting them.
+
+class CheckStatus(Enum):
+    PENDING = 'pending'
+
+
+class DocumentStatus(Enum):
+    PENDING = 'pending'
