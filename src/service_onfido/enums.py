@@ -19,7 +19,12 @@ class OnfidoDocumentType(Enum):
 
 class CheckStatus(Enum):
     PENDING = 'pending'
+    PROCESSING = 'processing'
+    CONSIDER = 'consider'
+    CLEAR = 'clear'
 
 
 class DocumentStatus(Enum):
     PENDING = 'pending'
+    DECLINED = 'declined'
+    VERIFIED = 'verified'

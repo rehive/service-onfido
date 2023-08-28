@@ -134,13 +134,6 @@ class ActivateSerializer(serializers.Serializer):
                         }
                     )
 
-        # TODO
-        # Add required onfido webhooks to service automatically.
-        onfido_webhooks = []
-
-        for webhook in onfido_webhooks:
-            continue
-
         return company
 
 
@@ -262,22 +255,8 @@ class OnfidoWebhookSerializer(serializers.Serializer):
                 {'non_field_errors': ["The company is improperly configured."]}
             )
 
-        # TODO
-        # Retrieve a secret token for the specific webhook event registered in
-        # Onfido.
-        try:
-            secret_token = company.onfidowebhooks.get(
-                event=payload.get("action")
-            ).secret_token
-        except OnfidoWebhook.DoesNotExist:
-            raise serializers.ValidationError(
-                {'non_field_errors': [
-                    "The event is not registered for this company."
-                ]}
-            )
-
         # Create an instance of the Onfido webhook verifier.
-        verifier = WebhookEventVerifier(secret_token)
+        verifier = WebhookEventVerifier(company.onfido_webhook_token)
 
         # Read and verify the signature using the raw request body.
         try:
@@ -293,29 +272,34 @@ class OnfidoWebhookSerializer(serializers.Serializer):
                 {'non_field_errors': ["Invalid signature."]}
             )
 
-        # TODO : Add company into validated_data
+        # Add the company to the validated data.
+        validated_data["company"] = company
 
         return validated_data
 
     def create(self, validated_data):
-        payload = validated_data.get("payload")
-        company = validated_data.get("company")
+        payload = validated_data.get('payload')
+        company = validated_data.get('company')
 
-        # Perform necessary functionality based on the payload action.
-        if payload.get("action") in ("check.completed", "check.withdrawn",):
-            try:
-                check = Check.objects.get(
-                    onfido_id=payload["object"]["id"],
-                    user__company=company
-                )
-            # The check does not exist in the database, ignore it.
-            except Check.DoesNotExist:
-                logger.error(
-                    "Check does not exist: {}.".format(payload["object"]["id"])
-                )
-            # Evaluate the check
-            else:
-                check.evaluate_async()
+        # Generate a unique ID for the event, so that we can guaranteed
+        # idempotency on webhooks.
+        identifier = "{}:{}".format(
+            payload.get("action"), payload.get("object")["id"]
+        )
+
+        # Log a webhook event so that we have the webhooks state stored and
+        # we can ensure webhooks are handled idempotently.
+        try:
+            webhook = OnfidoWebhook.objects.create(
+                identifier=identifier,
+                company=company,
+                payload=payload
+            )
+        except IntegrityError:
+            # The webhook has already been received, do nothing.
+            logger.info("Webhook already received.")
+        else:
+            webhook.process_async()
 
         return validated_data
 
@@ -338,8 +322,8 @@ class AdminCompanySerializer(CompanySerializer):
 
     class Meta:
         model = Company
-        fields = ('id', 'secret',)
-        read_only_fields = ('id', 'secret',)
+        fields = ('id', 'secret', 'onfido_api_key', 'onfido_webhook_id',)
+        read_only_fields = ('id', 'secret', 'onfido_webhook_id',)
 
 
 class AdminDocumentTypeSerializer(BaseModelSerializer):

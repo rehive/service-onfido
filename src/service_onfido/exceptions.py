@@ -17,3 +17,8 @@ class OnfidoError(OnfidoException):
 class PlatformWebhookProcessingError(OnfidoError):
     default_detail = 'Platform webhook processing error.'
     default_error_slug = 'platform_webhook_processing_error.'
+
+
+class OnfidoWebhookProcessingError(OnfidoError):
+    default_detail = 'Onfido webhook processing error.'
+    default_error_slug = 'onfido_webhook_processing_error.'

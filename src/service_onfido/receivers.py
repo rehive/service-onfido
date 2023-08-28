@@ -16,4 +16,4 @@ def document_post_save(sender, instance, created, **kwargs):
         return
 
     if created:
-        instance.process_assessment_async()
+        instance.generate_async()

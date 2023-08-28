@@ -12,7 +12,7 @@ logger = logging.getLogger('django')
 @shared_task(acks_late=True, bind=True, default_retry_delay=60)
 def process_platform_webhook(self, webhook_id):
     """
-    Task for processing webhooks.
+    Task for processing platform webhooks.
     """
 
     from service_onfido.models import PlatformWebhook
@@ -37,9 +37,36 @@ def process_platform_webhook(self, webhook_id):
 
 
 @shared_task(acks_late=True, bind=True, default_retry_delay=60)
-def process_document(self, document_id):
+def process_onfido_webhook(self, webhook_id):
     """
-    Task for processing documents.
+    Task for processing onfido webhooks.
+    """
+
+    from service_onfido.models import OnfidoWebhook
+    from service_onfido.exceptions import OnfidoWebhookProcessingError
+
+    try:
+        webhook = OnfidoWebhook.objects.get(id=webhook_id)
+    except OnfidoWebhook.DoesNotExist:
+        logger.error('Onfido webhook does not exist.')
+        return
+
+    try:
+        webhook.process()
+    except Exception as exc:
+        try:
+            self.retry(
+                max_retries=OnfidoWebhook.MAX_RETRIES,
+                exc=OnfidoWebhookProcessingError
+            )
+        except OnfidoWebhookProcessingError:
+            logger.info("Onfido webhook exceeded max retries.")
+
+
+@shared_task(acks_late=True, bind=True, default_retry_delay=60)
+def generate_document(self, document_id):
+    """
+    Task for generating documents.
     """
 
     from service_onfido.models import Document
@@ -50,7 +77,24 @@ def process_document(self, document_id):
         logger.error('Document does not exist.')
         return
 
-    document.process()
+    document.generate()
+
+
+# @shared_task(acks_late=True, bind=True, default_retry_delay=60)
+# def process_document(self, document_id):
+#     """
+#     Task for processing documents.
+#     """
+
+#     from service_onfido.models import Document
+
+#     try:
+#         document = Document.objects.get(id=document_id)
+#     except Document.DoesNotExist:
+#         logger.error('Document does not exist.')
+#         return
+
+#     document.process()
 
 
 @shared_task(acks_late=True, bind=True, default_retry_delay=60)
