@@ -33,11 +33,6 @@ urlpatterns = (
         views.AdminDocumentTypeView.as_view(),
         name='admin-documen-type-view'
     ),
-
-    # Admin list documents
-    # Admin retrieve documents
-    # Admin list checks
-    # Admin retrieve checks
 )
 
 urlpatterns = format_suffix_patterns(urlpatterns)

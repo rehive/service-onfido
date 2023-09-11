@@ -7,6 +7,11 @@ class WebhookEvent(Enum):
     USER_UPDATE = 'user.update'
 
 
+class DocumentTypeSide(Enum):
+    FRONT = "front"
+    BACK = "back"
+
+
 class OnfidoDocumentType(Enum):
     NATIONAL_IDENTITY_CARD = 'national_identity_card'
     DRIVING_LICENCE = 'driving_licence'

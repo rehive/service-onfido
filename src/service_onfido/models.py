@@ -26,7 +26,8 @@ from service_onfido.exceptions import (
     PlatformWebhookProcessingError, OnfidoWebhookProcessingError
 )
 from service_onfido.enums import (
-    WebhookEvent, OnfidoDocumentType, CheckStatus, DocumentStatus
+    WebhookEvent, OnfidoDocumentType, CheckStatus, DocumentStatus,
+    DocumentTypeSide
 )
 from service_onfido.utils.common import (
     get_unique_filename, to_cents, truncate, from_cents
@@ -309,28 +310,42 @@ class OnfidoWebhook(DateModel):
 
 class DocumentType(DateModel):
     """
-    Map Rehive document types to onfido document types.
+    Map Rehive document types to onfido document types. Also indictae the `side`
+    of the document if necessary.
     """
 
     identifier = models.UUIDField(unique=True, default=uuid.uuid4)
     company = models.ForeignKey(
         'service_onfido.Company', on_delete=models.CASCADE
     )
-    # Rehive document types are custom per company, hence the need for a
+    # Rehive document types have custom IDs per company, hence the need for a
     # mapping model like this.
     platform_type = models.CharField(max_length=64)
     # Onfido documents are always one of a known list (enum).
     onfido_type = EnumField(OnfidoDocumentType, max_length=100)
+    # The side of the document, if this is relevant.
+    side = EnumField(DocumentTypeSide, max_length=12, null=True, blank=True)
 
     class Meta:
+        """
+        Ensure that uniqueness is guaranteed across company, platform_type,
+        onfido_type, and side.
+
+        NOTE: We use conditional constraints here because NULL is a unique
+        value in postgres sql.
+        """
+
         constraints = [
             models.UniqueConstraint(
-                fields=['company', 'platform_type',],
-                name='document_type_unique_company_platform_type'
+                fields=['company', 'platform_type', 'onfido_type', 'side',],
+                condition=Q(side__isnull=False),
+                name='unique_company_platform_type_onfido_type_side'
             ),
+
             models.UniqueConstraint(
-                fields=['company', 'onfido_type',],
-                name='document_type_unique_company_onfido_type'
+                fields=['company', 'platform_type', 'onfido_type'],
+                condition=Q(side__isnull=True),
+                name='unique_company_platform_type_onfido_type'
             ),
         ]
 
@@ -370,7 +385,7 @@ class DocumentManager(models.Manager):
             identifier=uuid.UUID(platform_user['id']), company=company
         )
 
-        # Create the document in this service.
+        # Create the document in the service.
         document = self.create(
             user=user, platform_id=document_id, type=document_type
         )
@@ -476,14 +491,17 @@ class Document(DateModel):
             )
         )
 
+        # Generate ondifo document data.
+        data = {
+            "applicant_id": self.user.onfido_id,
+            "type": str(self.document_type.onfido_type)
+        }
+        # If the side is defined on the document add it to the `data`.
+        if self.document_type.side:
+            data["side"] = str(self.document_type.side)
+
         # Upload the document to the Onfido servers.
-        onfido_document = onfido_api.document.upload(
-            file,
-            {
-                "applicant_id": user.onfido_id,
-                "type": document_type.onfido_type
-            }
-        )
+        onfido_document = onfido_api.document.upload(file, data)
 
         # Record the onfido ID on this object.
         self.onfido_id = onfido_document["id"]

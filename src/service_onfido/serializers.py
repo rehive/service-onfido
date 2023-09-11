@@ -11,7 +11,9 @@ from drf_rehive_extras.serializers import BaseModelSerializer
 from drf_rehive_extras.fields import MetadataField, TimestampField, EnumField
 
 from config import settings
-from service_onfido.enums import WebhookEvent, OnfidoDocumentType
+from service_onfido.enums import (
+    WebhookEvent, OnfidoDocumentType, DocumentTypeSide
+)
 from service_onfido.models import Company, User, DocumentType, PlatformWebhook
 from service_onfido.authentication import HeaderAuthentication
 
@@ -329,6 +331,7 @@ class AdminCompanySerializer(CompanySerializer):
 class AdminDocumentTypeSerializer(BaseModelSerializer):
     id = serializers.CharField(read_only=True, source='identifier')
     onfido_type = EnumField(enum=OnfidoDocumentType)
+    side = EnumField(enum=DocumentTypeSide)
     created = TimestampField(read_only=True)
     updated = TimestampField(read_only=True)
 
@@ -336,8 +339,9 @@ class AdminDocumentTypeSerializer(BaseModelSerializer):
         model = DocumentType
         fields = (
             'id',
-            'rehive_type',
+            'platform_type',
             'onfido_type',
+            'side',
             'created',
             'updated',
         )
