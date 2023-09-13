@@ -175,13 +175,24 @@ class User(DateModel):
 
         return resource
 
-    def generate_onfido_applicant(self):
+    def generate(self):
         """
-        Generate a customer on onfido.
+        Generate the necessary resources.
         """
 
         if self.onfido_id:
             return
+
+        self.generate_onfido_resource()
+        self.generate_platform_resource()
+
+    def generate_onfido_resource(self):
+        """
+        Generate an applicant on onfido.
+        """
+
+        if self.onfido_id:
+            raise Exception("User has already been generated.")
 
         if not self.company.configured:
             raise Exception("Improperly configured company.")
@@ -200,6 +211,21 @@ class User(DateModel):
 
         self.onfido_id = applicant["id"]
         self.save()
+
+    def generate_platform_resource(self):
+        """
+        Generate the platform resource (Add metadata to it).
+        """
+
+        # Generate metadata
+        metadata = {
+            "service_onfido": {
+                "applicant": self.user.onfido_id
+            }
+        }
+
+        # Update on the platform.
+        rehive.admin.users.patch(self.identifier, metadata=metadata)
 
 
 class PlatformWebhook(DateModel):
@@ -386,7 +412,7 @@ class DocumentManager(models.Manager):
         )
 
         # Create the document in the service.
-        document = self.create(
+        return self.create(
             user=user, platform_id=document_id, type=document_type
         )
 
@@ -410,8 +436,12 @@ class Document(DateModel):
     status = EnumField(
         DocumentStatus, max_length=50, default=DocumentStatus.PENDING
     )
-
-    objects = DocumentManager()
+    # platform_status = EnumField(
+    #     DocumentPlatformStatus, max_length=50, default=DocumentStatus.PENDING
+    # )
+    # onfido_status = EnumField(
+    #     DocumentOnfidoStatus, max_length=50, default=DocumentStatus.PENDING
+    # )
 
     class Meta:
         constraints = [
@@ -467,18 +497,36 @@ class Document(DateModel):
 
     def generate(self):
         """
-        Generate the necessary onfido details and upload the file.
+        Generate the necessary resources.
         """
 
-        # Generate an onfido applicant if one has not been generated yet.
-        self.user.generate_onfido_applicant()
+        if self.onfido_id:
+            return
+
+        self.generate_onfido_resource()
+        self.generate_platform_resource()
+
+    def generate_onfido_resource(self):
+        """
+        Generate the onfido resources.
+        """
+
+        if self.onfido_id:
+            raise Exception("Document has already been generated.")
+
+        if not self.user.company.configured:
+            raise Exception("Improperly configured company.")
+
+        # Ensure the user's onfido resource has been generated.
+        # TODO : Should this occur when the user is created for the first time.
+        self.user.generate_onfido_resource()
 
         # Retrieve a file object using the Rehive resource URL.
         res = requests.get(self.platform_resource["file"], stream=True)
         if res.status_code != status.HTTP_200_OK:
             raise Exception("Invalid document file.")
 
-        # Convert the file into an in memory upload file.
+        # Convert the file into an in-memory upload file.
         content_type = res.headers.get('content-type', 'image/png')
         file = BufferedReader(
             InMemoryUploadedFile(
@@ -494,11 +542,11 @@ class Document(DateModel):
         # Generate ondifo document data.
         data = {
             "applicant_id": self.user.onfido_id,
-            "type": str(self.document_type.onfido_type)
+            "type": str(self.type.onfido_type)
         }
         # If the side is defined on the document add it to the `data`.
-        if self.document_type.side:
-            data["side"] = str(self.document_type.side)
+        if self.type.side:
+            data["side"] = str(self.type.side)
 
         # Upload the document to the Onfido servers.
         onfido_document = onfido_api.document.upload(file, data)
@@ -507,70 +555,74 @@ class Document(DateModel):
         self.onfido_id = onfido_document["id"]
         self.save()
 
-        # TODO : Should this generate the check here as well.
-
-    def transition_async(self, status):
+    def generate_platform_resource(self):
         """
-        Process the status async.
+        Generate the platform resource (Add metadata to it).
         """
 
-        tasks.transition_document.delay(self.id, status)
+        # Generate metadata
+        metadata = {
+            "service_onfido": {
+                "applicant": self.user.onfido_id,
+                "document": self.onfido_id
+            }
+        }
 
-    def transition(self, status):
-        """
-        Transition the status of the document.
-        """
+        # Update on the platform.
+        rehive.admin.users.documents.patch(
+            self.platform_id, status=status, metadata=metadata
+        )
 
-        if self.status == status:
-            return
+    def check(self):
+        # Add to a check.
+        # If this is a multi-side document.
+        if document.type.side:
+            try:
+                check = Check.objects.get(
+                    user=document.user,
+                    documents__type__onfido_type=document.type.onfido_type,
+                    documents__type__side=other_side,
+                )
+            except Check.DoesNotExist:
+                check = Check.objects.create(
+                    user=document.user, documents=[document]
+                )
+            # If the document is added to an existing check, then both sides
+            # are populated and the check can be generated.
+            else:
+                check.documents.add(document)
+                check.generate_async()
 
-        rehive = Rehive(self.user.company.admin.token)
-
-        """
-
-        Populate metadata with onfido ID on PLATFORM
-
-        Create a check if necessary and add document to it.
-
-        Add document to an existing check if a front/back document.
-
-        Update the PLATFORM document when the document is updated.
-
-        """
-
-        # Transition to PENDING and populate metadata.
-        # TODO : Only link this once the check is complete.
-        if status in (DocumentStatus.PENDING,):
-            # Update on the platform.
-            rehive.admin.users.documents.patch(
-                self.platform_id,
-                metadata={
-                    "service_onfido": {
-                        "document": {
-                            "id": self.onfido_id,
-                            "applicant_id": self.user.onfido_id,
-                        }
-                    }
-                }
+        # If this is a single side document create a check and generate it
+        # immediately.
+        else:
+            check = Check.objects.create(
+                user=document.user, documents=[document]
             )
+            check.generate_async()
 
-        # If final status is changed, modify on the platform.
-        if status in (DocumentStatus.VERIFIED, DocumentStatus.DECLINED):
-            # Update on the platform.
-            rehive.admin.users.documents.patch(
-                self.platform_id, status=status.value
-            )
 
-        # Update the document status.
-        self.status = status
-        self.save()
+class CheckManager(models.Manager):
+
+    @transaction.atomic
+    def create(self, documents=None, **kwargs):
+        """
+        Create an email address.
+        """
+
+        check = super().create(**kwargs)
+
+        if documents:
+            check.documents.set(documents)
+
+        return check
 
 
 class Check(DateModel):
     """
     Map checks to onfido checks.
 
-    Compiles multiple documents into a check that can be processed later.
+    Compiles multiple documents into a check that can be processed by Onfido.
     """
 
     identifier = models.UUIDField(unique=True, default=uuid.uuid4)
@@ -586,6 +638,8 @@ class Check(DateModel):
     status = EnumField(
         CheckStatus, max_length=50, default=CheckStatus.PENDING
     )
+
+    objects = CheckManager()
 
     def __str__(self):
         return str(self.identifier)
@@ -618,6 +672,16 @@ class Check(DateModel):
     def generate(self):
         """
         Generate the check by creating it in onfido.
+        """
+
+        if self.onfido_id:
+            return
+
+        self.generate_onfido_resource()
+
+    def generate_onfido_resource(self):
+        """
+        Generate the onfido resources for this check.
         """
 
         if self.onfido_id:

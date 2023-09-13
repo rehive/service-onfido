@@ -30,6 +30,10 @@ class CheckStatus(Enum):
 
 
 class DocumentStatus(Enum):
+    INITIATING = 'initiating'
     PENDING = 'pending'
-    DECLINED = 'declined'
-    VERIFIED = 'verified'
+    PROCESSING = 'processing'
+    COMPLETE = 'complete'
+    FAILED = 'failed'
+    #DECLINED = 'declined'
+    # VERIFIED = 'verified'

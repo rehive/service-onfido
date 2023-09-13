@@ -63,7 +63,7 @@ def process_onfido_webhook(self, webhook_id):
             logger.info("Onfido webhook exceeded max retries.")
 
 
-@shared_task(acks_late=True, bind=True, default_retry_delay=60)
+@shared_task(acks_late=True, bind=True, default_retry_delay=10)
 def generate_document(self, document_id):
     """
     Task for generating documents.
@@ -97,7 +97,7 @@ def generate_document(self, document_id):
 #     document.process()
 
 
-@shared_task(acks_late=True, bind=True, default_retry_delay=60)
+@shared_task(acks_late=True, bind=True, default_retry_delay=10)
 def generate_check(self, check_id):
     """
     Task for generating checks.
@@ -114,7 +114,7 @@ def generate_check(self, check_id):
     check.generate()
 
 
-@shared_task(acks_late=True, bind=True, default_retry_delay=60)
+@shared_task(acks_late=True, bind=True, default_retry_delay=10)
 def evaluate_check(self, check_id):
     """
     Task for evaluating checks.
