@@ -224,6 +224,8 @@ class User(DateModel):
             }
         }
 
+        rehive = Rehive(self.company.admin.token)
+
         # Update on the platform.
         rehive.admin.users.patch(self.identifier, metadata=metadata)
 
@@ -433,14 +435,14 @@ class Document(DateModel):
     type = models.ForeignKey(
         'service_onfido.DocumentType', on_delete=models.CASCADE
     )
-    status = EnumField(
-        DocumentStatus, max_length=50, default=DocumentStatus.PENDING
-    )
-    # platform_status = EnumField(
-    #     DocumentPlatformStatus, max_length=50, default=DocumentStatus.PENDING
+    # status = EnumField(
+    #     DocumentStatus, max_length=50, default=DocumentStatus.PENDING
     # )
-    # onfido_status = EnumField(
-    #     DocumentOnfidoStatus, max_length=50, default=DocumentStatus.PENDING
+    # platform_status = EnumField(
+    #     PlatformDocumentStatus, max_length=50, default=DocumentStatus.PENDING
+    # )
+    # onfido_resuly = EnumField(
+    #     OnfidoDocumentReportResult, max_length=50, default=DocumentStatus.PENDING
     # )
 
     class Meta:
@@ -553,7 +555,9 @@ class Document(DateModel):
 
         # Record the onfido ID on this object.
         self.onfido_id = onfido_document["id"]
-        self.save()
+
+        # Create a check
+        self.check()
 
     def generate_platform_resource(self):
         """
@@ -561,45 +565,47 @@ class Document(DateModel):
         """
 
         # Generate metadata
-        metadata = {
-            "service_onfido": {
-                "applicant": self.user.onfido_id,
-                "document": self.onfido_id
+        self.update_platform_resource({
+            "metadata": {
+                "service_onfido": {
+                    "applicant": self.user.onfido_id,
+                    "document": self.onfido_id
+                }
             }
-        }
+        })
 
-        # Update on the platform.
-        rehive.admin.users.documents.patch(
-            self.platform_id, status=status, metadata=metadata
-        )
+    def update_platform_resource(self, data):
+        """
+        Update the platform resources with data.
+        """
+
+        rehive = Rehive(self.company.admin.token)
+
+        rehive.admin.users.documents.patch(self.platform_id, **data)
 
     def check(self):
         # Add to a check.
         # If this is a multi-side document.
-        if document.type.side:
+        if self.type.side:
+            # Try and get a check containing a document of the same onfido
+            # type but a different side.
             try:
                 check = Check.objects.get(
-                    user=document.user,
-                    documents__type__onfido_type=document.type.onfido_type,
+                    user=self.user,
+                    documents__type__onfido_type=self.type.onfido_type,
                     documents__type__side=other_side,
                 )
+                check.documents.add(self)
             except Check.DoesNotExist:
-                check = Check.objects.create(
-                    user=document.user, documents=[document]
-                )
+                check = Check.objects.create(user=self.user, documents=[self])
             # If the document is added to an existing check, then both sides
             # are populated and the check can be generated.
             else:
-                check.documents.add(document)
-                check.generate_async()
+                check.documents.add(self)
 
-        # If this is a single side document create a check and generate it
-        # immediately.
+        # If this is a single side document create a check.
         else:
-            check = Check.objects.create(
-                user=document.user, documents=[document]
-            )
-            check.generate_async()
+            check = Check.objects.create(user=self.user, documents=[self])
 
 
 class CheckManager(models.Manager):
@@ -616,6 +622,9 @@ class CheckManager(models.Manager):
             check.documents.set(documents)
 
         return check
+
+        # TODO : As check is created decide whether to fire it off or not.
+        # After check is completed attempt to fire off the next check in order.
 
 
 class Check(DateModel):
@@ -718,36 +727,41 @@ class Check(DateModel):
         Evaluate a check after it is updated on Onfido.
         """
 
-        if self.onfido_id:
-            raise Exception(
-                "Cannot evaluate a check that has not been generated."
-            )
+        if not self.onfido_id:
+            raise Exception("Improperly configured check.")
 
         if not self.user.company.configured:
             raise Exception("Improperly configured company.")
 
+        if self.status == CheckStatus.COMPLETE:
+            raise Exception("Check has already been evaluated.")
+
         # Get the onfido object.
         onfido_check = self.onfido_resource
 
+        # TODO : Siwtch to document sub result onfido statuses.
+        # OnfidoDocumentReportResult
+
         # Check if statuses need to change.
         if onfido_check["result"] == "consider":
-            new_status = CheckStatus.CONSIDER
-            document_status = DocumentStatus.DECLINED
+            document_status = PlatformDocumentStatus.DECLINED
         elif onfido_check["result"] == "clear":
-            new_status = CheckStatus.CLEAR
-            document_status = DocumentStatus.VERIFIED
+            document_status = PlatformDocumentStatus.VERIFIED
+        # TODO : Should this be pending.
         else:
-            new_status = None
-            document_status = None
-
-        # Check if thie check has been evaluated already.
-        if not new_status or self.status == new_status:
-            return
+            document_status = PlatformDocumentStatus.PENDING
 
         # Apply document status changes to all related documents.
         for d in self.documents.all():
-            d.transition(document_status)
+            d.update_platform_resource({
+                "status": document_status,
+                "metadata": {
+                    "service_onfido": {
+                        "check": self.onfido_id
+                    }
+                }
+            })
 
-        # Update the checks status.
-        self.status = new_status
+        # Update the checks status to complete.
+        self.status = CheckStatus.COMPLETE
         self.save()

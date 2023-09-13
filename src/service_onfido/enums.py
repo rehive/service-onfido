@@ -25,15 +25,33 @@ class OnfidoDocumentType(Enum):
 class CheckStatus(Enum):
     PENDING = 'pending'
     PROCESSING = 'processing'
-    CONSIDER = 'consider'
-    CLEAR = 'clear'
+    COMPLETE = 'complete'
+    FAILED = 'failed'
 
 
 class DocumentStatus(Enum):
-    INITIATING = 'initiating'
     PENDING = 'pending'
     PROCESSING = 'processing'
     COMPLETE = 'complete'
     FAILED = 'failed'
-    #DECLINED = 'declined'
-    # VERIFIED = 'verified'
+
+
+class PlatformDocumentStatus(Enum):
+    OBSOLETE = 'obsolete'
+    DECLINED = 'declined'
+    PENDING = 'pending'
+    INCOMPLETE = 'incomplete'
+    VERIFIED = 'verified'
+
+
+class OnfidoReportResult(Enum):
+    CLEAR = 'clear'
+    CONSIDER = 'consider'
+    UNIDENTIFIED = 'unidentifier'
+
+
+class OnfidoDocumentReportResult(Enum):
+    CLEAR = 'clear'
+    REJECTED = 'rejected'
+    SUSPECTED = 'suspected'
+    CAUTION = 'caution'
