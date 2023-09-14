@@ -19,17 +19,11 @@ class OnfidoDocumentType(Enum):
     VOTER_ID = 'voter_id'
     WORK_PERMIT = 'work_permit'
     # TODO : Do we want to support UNKNOWN in some way?
-    # TODO : There are clearly more types, Onfido just documents them badly.
+    # TODO : There are more types, Onfido just documents them badly. We should
+    # search the documents to try and find all types.
 
 
 class CheckStatus(Enum):
-    PENDING = 'pending'
-    PROCESSING = 'processing'
-    COMPLETE = 'complete'
-    FAILED = 'failed'
-
-
-class DocumentStatus(Enum):
     PENDING = 'pending'
     PROCESSING = 'processing'
     COMPLETE = 'complete'
@@ -55,3 +49,17 @@ class OnfidoDocumentReportResult(Enum):
     REJECTED = 'rejected'
     SUSPECTED = 'suspected'
     CAUTION = 'caution'
+
+    @staticmethod
+    def get_platform_document_status(enum):
+        """
+        Map a onfido report result to a platform status.
+        """
+
+        key_map = {
+            OnfidoDocumentReportResult.CLEAR: PlatformDocumentStatus.VERIFIED,
+            OnfidoDocumentReportResult.REJECTED: PlatformDocumentStatus.DECLINED,
+            OnfidoDocumentReportResult.SUSPECTED: PlatformDocumentStatus.DECLINED,
+            OnfidoDocumentReportResult.CAUTION : PlatformDocumentStatus.DECLINED,
+        }
+        return key_map[self]

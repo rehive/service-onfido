@@ -26,8 +26,8 @@ from service_onfido.exceptions import (
     PlatformWebhookProcessingError, OnfidoWebhookProcessingError
 )
 from service_onfido.enums import (
-    WebhookEvent, OnfidoDocumentType, CheckStatus, DocumentStatus,
-    DocumentTypeSide
+    WebhookEvent, OnfidoDocumentType, CheckStatus, DocumentTypeSide,
+    OnfidoDocumentReportResult
 )
 from service_onfido.utils.common import (
     get_unique_filename, to_cents, truncate, from_cents
@@ -69,11 +69,12 @@ class Company(DateModel, StateModel):
                 and self.onfido_api_key != self.original.onfido_api_key):
             self.configure_onfido()
 
-    def natural_key(self):
-        return (self.identifier,)
-
     @property
     def configured(self):
+        """
+        Check if the company is configured fully for onfido usage.
+        """
+
         if (self.onfido_api_key
                 and self.onfido_webhook_id
                 and self.onfido_webhook_token
@@ -84,7 +85,7 @@ class Company(DateModel, StateModel):
 
     def configure_onfido(self):
         """
-        Configure Onfido using the API key.
+        Configure the company using the Onfido API key.
         """
 
         # If no API key is set, remove the webhook details.
@@ -140,6 +141,10 @@ class User(DateModel):
 
     @property
     def configured(self):
+        """
+        Check if the user is configured fully for onfido usage.
+        """
+
         if (self.onfido_id):
             return True
 
@@ -153,9 +158,7 @@ class User(DateModel):
 
         rehive = Rehive(self.company.admin.token)
 
-        resource = rehive.admin.users.documents.get(self.identifier)
-
-        return resource
+        return rehive.admin.users.documents.get(self.identifier)
 
     @cached_property
     def onfido_resource(self):
@@ -171,13 +174,20 @@ class User(DateModel):
 
         onfido_api = onfido.Api(self.company.onfido_api_key)
 
-        resource = onfido_api.applicant.find(self.onfido_id)
+        return onfido_api.applicant.find(self.onfido_id)
 
-        return resource
+    def generate_async(self):
+        """
+        Generate the user asynchronously.
+        """
+
+        tasks.generate_user.delay(self.id)
 
     def generate(self):
         """
-        Generate the necessary resources.
+        Generate the user.
+
+        Generates an Onfido resource and populates the platform metadata.
         """
 
         if self.onfido_id:
@@ -217,17 +227,22 @@ class User(DateModel):
         Generate the platform resource (Add metadata to it).
         """
 
-        # Generate metadata
-        metadata = {
-            "service_onfido": {
-                "applicant": self.user.onfido_id
+        self.update_platform_resource({
+            "metadata": {
+                "service_onfido": {
+                    "applicant": self.onfido_id
+                }
             }
-        }
+        })
+
+    def update_platform_resource(self, data):
+        """
+        Update the platform resources with data.
+        """
 
         rehive = Rehive(self.company.admin.token)
 
-        # Update on the platform.
-        rehive.admin.users.patch(self.identifier, metadata=metadata)
+        rehive.admin.users.patch(self.identifier, **data)
 
 
 class PlatformWebhook(DateModel):
@@ -253,9 +268,17 @@ class PlatformWebhook(DateModel):
         return str(self.identifier)
 
     def process_async(self):
+        """
+        Process the platform webhook asynchronously.
+        """
+
         tasks.process_platform_webhook.delay(self.id)
 
     def process(self):
+        """
+        Process the platform webhook.
+        """
+
         # Increment the number of tries.
         self.tries = self.tries + 1
 
@@ -264,8 +287,8 @@ class PlatformWebhook(DateModel):
                 Document.objects.create_using_platform_event(
                     self.company, self.data
                 )
-            # TODO : Add functionality to override statuses OR withdraw checks
-            # if the status is updated directly in the platform.
+            # FUTURE : Add functionality to handle check withdrawal.
+            # updated directly in the platform.
             # elif self.event == WebhookEvent.DOCUMENT_UPDATE:
             #     pass
 
@@ -301,9 +324,17 @@ class OnfidoWebhook(DateModel):
         return str(self.identifier)
 
     def process_async(self):
+        """
+        Process the onfido webhook asynchronously.
+        """
+
         tasks.process_onfido_webhook.delay(self.id)
 
     def process(self):
+        """
+        Process the onfido webhook.
+        """
+
         # Increment the number of tries.
         self.tries = self.tries + 1
 
@@ -320,9 +351,8 @@ class OnfidoWebhook(DateModel):
                     pass
                 # Evaluate the check if it exists.
                 else:
-                    check.evaluate_async()
-            # TODO : Add functionality to withdraw checks and fail the
-            # associated documents.
+                    check.evaluate()
+            # FUTURE : Add functionality to handle check withdrawal.
             # elif self.payload.get("action") in "check.withdrawn":
             #     pass
 
@@ -435,15 +465,6 @@ class Document(DateModel):
     type = models.ForeignKey(
         'service_onfido.DocumentType', on_delete=models.CASCADE
     )
-    # status = EnumField(
-    #     DocumentStatus, max_length=50, default=DocumentStatus.PENDING
-    # )
-    # platform_status = EnumField(
-    #     PlatformDocumentStatus, max_length=50, default=DocumentStatus.PENDING
-    # )
-    # onfido_resuly = EnumField(
-    #     OnfidoDocumentReportResult, max_length=50, default=DocumentStatus.PENDING
-    # )
 
     class Meta:
         constraints = [
@@ -468,9 +489,7 @@ class Document(DateModel):
 
         rehive = Rehive(self.user.company.admin.token)
 
-        resource = rehive.admin.users.documents.get(self.platform_id)
-
-        return resource
+        return rehive.admin.users.documents.get(self.platform_id)
 
     @cached_property
     def onfido_resource(self):
@@ -486,20 +505,20 @@ class Document(DateModel):
 
         onfido_api = onfido.Api(self.user.company.onfido_api_key)
 
-        resource = onfido_api.document.find(self.onfido_id)
-
-        return resource
+        return onfido_api.document.find(self.onfido_id)
 
     def generate_async(self):
         """
-        Generate the document async.
+        Generate the document asynchronously.
         """
 
         tasks.generate_document.delay(self.id)
 
     def generate(self):
         """
-        Generate the necessary resources.
+        Generate the document.
+
+        Generates an Onfido resource and populates the platform metadata.
         """
 
         if self.onfido_id:
@@ -557,14 +576,13 @@ class Document(DateModel):
         self.onfido_id = onfido_document["id"]
 
         # Create a check
-        self.check()
+        self.attach_to_check()
 
     def generate_platform_resource(self):
         """
         Generate the platform resource (Add metadata to it).
         """
 
-        # Generate metadata
         self.update_platform_resource({
             "metadata": {
                 "service_onfido": {
@@ -579,11 +597,25 @@ class Document(DateModel):
         Update the platform resources with data.
         """
 
-        rehive = Rehive(self.company.admin.token)
+        rehive = Rehive(self.user.company.admin.token)
 
         rehive.admin.users.documents.patch(self.platform_id, **data)
 
-    def check(self):
+    @transaction.atomic
+    def attach_to_check(self):
+        """
+        Create a check for this document.
+        """
+
+        if not self.onfido_id:
+            raise Exception("Improperly configured document.")
+
+        # Lock on the user to ensure only a single check can be created at a
+        # time per user.
+        user = User.objects.select_for_update().get(
+            id=self.user.id
+        )
+
         # Add to a check.
         # If this is a multi-side document.
         if self.type.side:
@@ -602,7 +634,6 @@ class Document(DateModel):
             # are populated and the check can be generated.
             else:
                 check.documents.add(self)
-
         # If this is a single side document create a check.
         else:
             check = Check.objects.create(user=self.user, documents=[self])
@@ -613,7 +644,7 @@ class CheckManager(models.Manager):
     @transaction.atomic
     def create(self, documents=None, **kwargs):
         """
-        Create an email address.
+        Create a check and add associated documents in the same transaction.
         """
 
         check = super().create(**kwargs)
@@ -622,9 +653,6 @@ class CheckManager(models.Manager):
             check.documents.set(documents)
 
         return check
-
-        # TODO : As check is created decide whether to fire it off or not.
-        # After check is completed attempt to fire off the next check in order.
 
 
 class Check(DateModel):
@@ -642,8 +670,9 @@ class Check(DateModel):
     )
     onfido_id = models.CharField(max_length=64)
     # List of documents that should be reported on.
-    # TODO : Do we want to limit the number of documents accepted.
+    # FUTURE : Do we want to limit the number of documents accepted.
     documents = models.ManyToManyField('service_onfido.Document')
+    # The internal status of this check, this does not store an onfido status.
     status = EnumField(
         CheckStatus, max_length=50, default=CheckStatus.PENDING
     )
@@ -667,20 +696,36 @@ class Check(DateModel):
 
         onfido_api = onfido.Api(self.user.company.onfido_api_key)
 
-        resource = onfido_api.check.find(self.onfido_id)
+        return onfido_api.check.find(self.onfido_id)
 
-        return resource
+    @cached_property
+    def onfido_report_resources(self):
+        """
+        Get the report resources directly from onfido.
+        """
+
+        if not self.onfido_id:
+            raise Exception("Improperly configured check.")
+
+        if not self.user.company.configured:
+            raise Exception("Improperly configured company.")
+
+        onfido_api = onfido.Api(self.user.company.onfido_api_key)
+
+        return onfido_api.report.all(self.onfido_id)
 
     def generate_async(self):
         """
-        Generate the check async.
+        Generate the check asynchronously.
         """
 
         tasks.generate_check.delay(self.id)
 
     def generate(self):
         """
-        Generate the check by creating it in onfido.
+        Generate the check.
+
+        Generates an Onfido resource.
         """
 
         if self.onfido_id:
@@ -717,51 +762,55 @@ class Check(DateModel):
 
     def evaluate_async(self):
         """
-        Evaluate a check async.
+        Evaluate a check asynchronously.
         """
 
         tasks.evaluate_check.delay(self.id)
 
     def evaluate(self):
         """
-        Evaluate a check after it is updated on Onfido.
+        Evaluate a check.
+
+        Evaluates each related check report to see if the platform needs updates.
         """
-
-        if not self.onfido_id:
-            raise Exception("Improperly configured check.")
-
-        if not self.user.company.configured:
-            raise Exception("Improperly configured company.")
 
         if self.status == CheckStatus.COMPLETE:
             raise Exception("Check has already been evaluated.")
 
-        # Get the onfido object.
+        # Retrieve an onfido check resource.
         onfido_check = self.onfido_resource
 
-        # TODO : Siwtch to document sub result onfido statuses.
-        # OnfidoDocumentReportResult
-
-        # Check if statuses need to change.
-        if onfido_check["result"] == "consider":
-            document_status = PlatformDocumentStatus.DECLINED
-        elif onfido_check["result"] == "clear":
-            document_status = PlatformDocumentStatus.VERIFIED
-        # TODO : Should this be pending.
+        # Check whether the check is ready for evaluation.
+        if onfido_check["status"] in ("complete", "withdrawn"):
+            self.status = CheckStatus.COMPLETE
         else:
-            document_status = PlatformDocumentStatus.PENDING
+            raise Exception("Check is notready to be evaluated.")
+
+        # Retrieve a list of reports for the check.
+        onfido_reports = self.onfido_report_resources
+
+        # Iterate through document reports and set a document_status.
+        platform_document_status = None
+        for report in [r for r in reports if r["name"] == "document"]:
+            # If the report is complete fetch the sub_result
+            if report["status"] == "complete":
+                # Fetch a platform status for the report result.
+                platform_document_status = OnfidoDocumentReportResult(
+                    report["sub_result"]
+                ).get_platform_document_status()
 
         # Apply document status changes to all related documents.
-        for d in self.documents.all():
-            d.update_platform_resource({
-                "status": document_status,
-                "metadata": {
+        if platform_document_status:
+            for d in self.documents.all():
+                metadata = {
                     "service_onfido": {
                         "check": self.onfido_id
                     }
                 }
-            })
+                d.update_platform_resource({
+                    "status": platform_document_status,
+                    "metadata": metadata
+                })
 
-        # Update the checks status to complete.
-        self.status = CheckStatus.COMPLETE
+        # Save the status on the check.
         self.save()

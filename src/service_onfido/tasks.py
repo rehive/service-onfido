@@ -64,6 +64,23 @@ def process_onfido_webhook(self, webhook_id):
 
 
 @shared_task(acks_late=True, bind=True, default_retry_delay=10)
+def generate_user(self, user_id):
+    """
+    Task for generating users.
+    """
+
+    from service_onfido.models import User
+
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        logger.error('User does not exist.')
+        return
+
+    user.generate()
+
+
+@shared_task(acks_late=True, bind=True, default_retry_delay=10)
 def generate_document(self, document_id):
     """
     Task for generating documents.
@@ -78,23 +95,6 @@ def generate_document(self, document_id):
         return
 
     document.generate()
-
-
-# @shared_task(acks_late=True, bind=True, default_retry_delay=60)
-# def process_document(self, document_id):
-#     """
-#     Task for processing documents.
-#     """
-
-#     from service_onfido.models import Document
-
-#     try:
-#         document = Document.objects.get(id=document_id)
-#     except Document.DoesNotExist:
-#         logger.error('Document does not exist.')
-#         return
-
-#     document.process()
 
 
 @shared_task(acks_late=True, bind=True, default_retry_delay=10)
