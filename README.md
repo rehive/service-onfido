@@ -6,6 +6,12 @@ Requires the following permissions in Rehive:
 
 permissions |
 ---|
+admin.company.view |
+admin.webhook.add |
+admin.document.view |
+admin.document.change |
+admin.user.view |
+admin.user.change |
 
 
 ## Getting started

@@ -9,7 +9,8 @@ from datetime import timedelta
 from io import BytesIO, BufferedReader
 
 import onfido
-from onfido.exceptions import OnfidoInvalidSignatureError
+from onfido.regions import Region
+from onfido.exceptions import OnfidoInvalidSignatureError, OnfidoRequestError
 from enumfields import EnumField
 from rehive import Rehive, APIException
 from django.db import models, transaction, IntegrityError
@@ -95,12 +96,12 @@ class Company(DateModel, StateModel):
             self.save()
             return
 
-        onfido_api = onfido.Api(self.onfido_api_key)
+        onfido_api = onfido.Api(self.onfido_api_key, region=Region.EU)
 
         # If a webhook already exists, delete it.
         if self.onfido_webhook_id:
             try:
-                api.webhook.delete(self.onfido_webhook_id)
+                onfido_api.webhook.delete(self.onfido_webhook_id)
             # Ignore 400 errors.
             except OnfidoRequestError:
                 pass
@@ -172,7 +173,7 @@ class User(DateModel):
         if not self.company.configured:
             raise Exception("Improperly configured company.")
 
-        onfido_api = onfido.Api(self.company.onfido_api_key)
+        onfido_api = onfido.Api(self.company.onfido_api_key, region=Region.EU)
 
         return onfido_api.applicant.find(self.onfido_id)
 
@@ -207,7 +208,7 @@ class User(DateModel):
         if not self.company.configured:
             raise Exception("Improperly configured company.")
 
-        onfido_api = onfido.Api(self.company.onfido_api_key)
+        onfido_api = onfido.Api(self.company.onfido_api_key, region=Region.EU)
 
         # Create customer on onfido.
         applicant = api.applicant.create({
@@ -466,6 +467,8 @@ class Document(DateModel):
         'service_onfido.DocumentType', on_delete=models.CASCADE
     )
 
+    objects = DocumentManager()
+
     class Meta:
         constraints = [
             models.UniqueConstraint(
@@ -503,7 +506,9 @@ class Document(DateModel):
         if not self.user.company.configured:
             raise Exception("Improperly configured company.")
 
-        onfido_api = onfido.Api(self.user.company.onfido_api_key)
+        onfido_api = onfido.Api(
+            self.user.company.onfido_api_key, region=Region.EU
+        )
 
         return onfido_api.document.find(self.onfido_id)
 
@@ -694,7 +699,9 @@ class Check(DateModel):
         if not self.user.company.configured:
             raise Exception("Improperly configured company.")
 
-        onfido_api = onfido.Api(self.user.company.onfido_api_key)
+        onfido_api = onfido.Api(
+            self.user.company.onfido_api_key, region=Region.EU
+        )
 
         return onfido_api.check.find(self.onfido_id)
 
@@ -710,7 +717,9 @@ class Check(DateModel):
         if not self.user.company.configured:
             raise Exception("Improperly configured company.")
 
-        onfido_api = onfido.Api(self.user.company.onfido_api_key)
+        onfido_api = onfido.Api(
+            self.user.company.onfido_api_key, region=Region.EU
+        )
 
         return onfido_api.report.all(self.onfido_id)
 
@@ -748,7 +757,9 @@ class Check(DateModel):
         self.status = CheckStatus.PROCESSING
         self.save()
 
-        onfido_api = onfido.Api(self.user.company.onfido_api_key)
+        onfido_api = onfido.Api(
+            self.user.company.onfido_api_key, region=Region.EU
+        )
 
         # Generate the check.
         check = api.check.create({

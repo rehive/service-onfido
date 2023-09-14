@@ -331,7 +331,7 @@ class AdminCompanySerializer(CompanySerializer):
 class AdminDocumentTypeSerializer(BaseModelSerializer):
     id = serializers.CharField(read_only=True, source='identifier')
     onfido_type = EnumField(enum=OnfidoDocumentType)
-    side = EnumField(enum=DocumentTypeSide)
+    side = EnumField(enum=DocumentTypeSide, required=False)
     created = TimestampField(read_only=True)
     updated = TimestampField(read_only=True)
 

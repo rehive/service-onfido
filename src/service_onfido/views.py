@@ -109,7 +109,7 @@ class AdminListDocumentTypeView(ListCreateAPIView):
         ).order_by('-created')
 
 
-class AdminDocumentTypeView(RetrieveAPIView):
+class AdminDocumentTypeView(RetrieveUpdateAPIView):
     serializer_class = AdminDocumentTypeSerializer
     authentication_classes = (AdminAuthentication,)
 

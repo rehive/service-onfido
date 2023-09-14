@@ -15,8 +15,8 @@ def document_post_save(sender, instance, created, **kwargs):
     if kwargs.get('raw', False):
         return
 
-    if created:
-        instance.generate_async()
+    # if created:
+    #     instance.generate_async()
 
 
 # @receiver(m2m_changed, sender=Check.documents.through)
