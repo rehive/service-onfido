@@ -63,12 +63,12 @@ class Company(DateModel, StateModel):
         Configure webhooks.
         """
 
-        super().save(*args, **kwargs)
-
         # If the onfido API key is changing.
         if self.id and (self.original
                 and self.onfido_api_key != self.original.onfido_api_key):
             self.configure_onfido()
+
+        super().save(*args, **kwargs)
 
     @property
     def configured(self):
@@ -93,7 +93,6 @@ class Company(DateModel, StateModel):
         if not self.onfido_api_key:
             self.onfido_webhook_id = None
             self.onfido_webhook_token = None
-            self.save()
             return
 
         onfido_api = onfido.Api(self.onfido_api_key, region=Region.EU)
@@ -109,7 +108,6 @@ class Company(DateModel, StateModel):
             else:
                 self.onfido_webhook_id = None
                 self.onfido_webhook_token = None
-                self.save()
 
         # Create the required webhook on Onfido.
         webhook = onfido_api.webhook.create(
@@ -124,7 +122,6 @@ class Company(DateModel, StateModel):
 
         self.onfido_webhook_id = webhook["id"]
         self.onfido_webhook_token = webhook["token"]
-        self.save()
 
 
 class User(DateModel):
