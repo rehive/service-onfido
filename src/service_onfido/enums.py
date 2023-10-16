@@ -4,6 +4,7 @@ from enumfields.enums import Enum
 class WebhookEvent(Enum):
     DOCUMENT_CREATE = 'document.create'
     DOCUMENT_UPDATE = 'document.update'
+    USER_CREATE = 'user.create'
     USER_UPDATE = 'user.update'
 
 
@@ -24,7 +25,11 @@ class OnfidoDocumentType(Enum):
 
 
 class CheckStatus(Enum):
+    # Waiting for the other side of a multi side document.
+    INITIATING = 'initiating'
+    # Waiting to be submitted to onfido (ready).
     PENDING = 'pending'
+    # Submitted to onfido and waiting Onfido resulys.
     PROCESSING = 'processing'
     COMPLETE = 'complete'
     FAILED = 'failed'

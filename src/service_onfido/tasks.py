@@ -63,7 +63,12 @@ def process_onfido_webhook(self, webhook_id):
             logger.info("Onfido webhook exceeded max retries.")
 
 
-@shared_task(acks_late=True, bind=True, default_retry_delay=10)
+@shared_task(
+    acks_late=True,
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_kwargs={'max_retries': 5, 'countdown': 10}
+)
 def generate_user(self, user_id):
     """
     Task for generating users.
@@ -77,10 +82,18 @@ def generate_user(self, user_id):
         logger.error('User does not exist.')
         return
 
-    user.generate()
+    try:
+        user.generate()
+    except Exception as exc:
+        logger.exception(exc)
 
 
-@shared_task(acks_late=True, bind=True, default_retry_delay=10)
+@shared_task(
+    acks_late=True,
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_kwargs={'max_retries': 5, 'countdown': 10}
+)
 def generate_document(self, document_id):
     """
     Task for generating documents.
@@ -94,10 +107,18 @@ def generate_document(self, document_id):
         logger.error('Document does not exist.')
         return
 
-    document.generate()
+    try:
+        document.generate()
+    except Exception as exc:
+        logger.exception(exc)
 
 
-@shared_task(acks_late=True, bind=True, default_retry_delay=10)
+@shared_task(
+    acks_late=True,
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_kwargs={'max_retries': 5, 'countdown': 10}
+)
 def generate_check(self, check_id):
     """
     Task for generating checks.
@@ -111,10 +132,18 @@ def generate_check(self, check_id):
         logger.error('Check does not exist.')
         return
 
-    check.generate()
+    try:
+        check.generate()
+    except Exception as exc:
+        logger.exception(exc)
 
 
-@shared_task(acks_late=True, bind=True, default_retry_delay=10)
+@shared_task(
+    acks_late=True,
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_kwargs={'max_retries': 5, 'countdown': 10}
+)
 def evaluate_check(self, check_id):
     """
     Task for evaluating checks.
@@ -128,4 +157,7 @@ def evaluate_check(self, check_id):
         logger.error('Check does not exist.')
         return
 
-    check.evaluate()
+    try:
+        check.evaluate()
+    except Exception as exc:
+        logger.exception(exc)

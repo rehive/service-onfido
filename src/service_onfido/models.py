@@ -24,7 +24,8 @@ from django.core.files.uploadedfile import InMemoryUploadedFile
 
 from config import settings
 from service_onfido.exceptions import (
-    PlatformWebhookProcessingError, OnfidoWebhookProcessingError
+    PlatformWebhookProcessingError, OnfidoWebhookProcessingError,
+    UserProcessingError, DocumentProcessingError, CheckProcessingError
 )
 from service_onfido.enums import (
     WebhookEvent, OnfidoDocumentType, CheckStatus, DocumentTypeSide,
@@ -165,10 +166,10 @@ class User(DateModel):
         """
 
         if not self.onfido_id:
-            raise Exception("Improperly configured user")
+            raise UserProcessingError("Improperly configured user")
 
         if not self.company.configured:
-            raise Exception("Improperly configured company.")
+            raise UserProcessingError("Improperly configured company.")
 
         onfido_api = onfido.Api(self.company.onfido_api_key, region=Region.EU)
 
@@ -200,10 +201,10 @@ class User(DateModel):
         """
 
         if self.onfido_id:
-            raise Exception("User has already been generated.")
+            return
 
         if not self.company.configured:
-            raise Exception("Improperly configured company.")
+            raise UserProcessingError("Improperly configured company.")
 
         onfido_api = onfido.Api(self.company.onfido_api_key, region=Region.EU)
 
@@ -211,8 +212,8 @@ class User(DateModel):
         applicant = api.applicant.create({
             # TODO : Populate with the correct values.
             # Can default to dummy values as well.
-            "first_name": "Jane",
-            "last_name": "Doe",
+            "first_name": "",
+            "last_name": "",
             #"dob": "1984-01-01",
             #"address": {}
         })
@@ -349,7 +350,7 @@ class OnfidoWebhook(DateModel):
                     pass
                 # Evaluate the check if it exists.
                 else:
-                    check.evaluate()
+                    check.evaluate_async()
             # FUTURE : Add functionality to handle check withdrawal.
             # elif self.payload.get("action") in "check.withdrawn":
             #     pass
@@ -418,7 +419,7 @@ class DocumentManager(models.Manager):
         """
 
         if not company.configured:
-            raise Exception("Improperly configured company.")
+            raise DocumentProcessingError("Improperly configured company.")
 
         # Ensure the event data has the necessary fields.
         try:
@@ -426,7 +427,7 @@ class DocumentManager(models.Manager):
             platform_user = data["user"]
             platform_type = data["type"]
         except KeyError:
-            raise ValueError("Invalid document event data.")
+            raise DocumentProcessingError("Invalid document event data.")
 
         # Find a document type using the event data.
         try:
@@ -434,12 +435,18 @@ class DocumentManager(models.Manager):
                 platform_type=platform_type["id"], company=company
             )
         except DocumentType.DoesNotExist:
-            raise ValueError("A document type mapping has not been configured.")
+            raise DocumentProcessingError(
+                "A document type mapping has not been configured."
+            )
 
         # Find or create a user using the event data.
         user, created = User.objects.get_or_create(
             identifier=uuid.UUID(platform_user['id']), company=company
         )
+
+        # Ensure the user's onfido resource has been generated.
+        # TODO : Should this occur when the user is created for the first time.
+        user.generate()
 
         # Create the document in the service.
         return self.create(
@@ -498,10 +505,10 @@ class Document(DateModel):
         """
 
         if not self.onfido_id:
-            raise Exception("Improperly configured document.")
+            raise DocumentProcessingError("Improperly configured document.")
 
         if not self.user.company.configured:
-            raise Exception("Improperly configured company.")
+            raise DocumentProcessingError("Improperly configured company.")
 
         onfido_api = onfido.Api(
             self.user.company.onfido_api_key, region=Region.EU
@@ -535,19 +542,15 @@ class Document(DateModel):
         """
 
         if self.onfido_id:
-            raise Exception("Document has already been generated.")
+            return
 
         if not self.user.company.configured:
-            raise Exception("Improperly configured company.")
-
-        # Ensure the user's onfido resource has been generated.
-        # TODO : Should this occur when the user is created for the first time.
-        self.user.generate_onfido_resource()
+            raise DocumentProcessingError("Improperly configured company.")
 
         # Retrieve a file object using the Rehive resource URL.
         res = requests.get(self.platform_resource["file"], stream=True)
         if res.status_code != status.HTTP_200_OK:
-            raise Exception("Invalid document file.")
+            raise DocumentProcessingError("Invalid document file.")
 
         # Convert the file into an in-memory upload file.
         content_type = res.headers.get('content-type', 'image/png')
@@ -610,13 +613,11 @@ class Document(DateModel):
         """
 
         if not self.onfido_id:
-            raise Exception("Improperly configured document.")
+            raise DocumentProcessingError("Improperly configured document.")
 
         # Lock on the user to ensure only a single check can be created at a
         # time per user.
-        user = User.objects.select_for_update().get(
-            id=self.user.id
-        )
+        user = User.objects.select_for_update().get(id=self.user.id)
 
         # Add to a check.
         # If this is a multi-side document.
@@ -629,16 +630,21 @@ class Document(DateModel):
                     documents__type__onfido_type=self.type.onfido_type,
                     documents__type__side=other_side,
                 )
-                check.documents.add(self)
             except Check.DoesNotExist:
                 check = Check.objects.create(user=self.user, documents=[self])
             # If the document is added to an existing check, then both sides
-            # are populated and the check can be generated.
+            # are populated and the check can be set to PENDING.
             else:
                 check.documents.add(self)
+                check.status = CheckStatus.PENDING
+                check.save()
         # If this is a single side document create a check.
         else:
-            check = Check.objects.create(user=self.user, documents=[self])
+            check = Check.objects.create(
+                user=self.user,
+                documents=[self],
+                status=CheckStatus.PENDING
+            )
 
 
 class CheckManager(models.Manager):
@@ -676,10 +682,22 @@ class Check(DateModel):
     documents = models.ManyToManyField('service_onfido.Document')
     # The internal status of this check, this does not store an onfido status.
     status = EnumField(
-        CheckStatus, max_length=50, default=CheckStatus.PENDING
+        CheckStatus, max_length=50, default=CheckStatus.INITIATING
     )
 
     objects = CheckManager()
+
+    class Meta:
+        constraints = [
+            # Ensure that only one PROCESSING check can exist per user.
+            models.UniqueConstraint(
+                fields=['user', 'status'],
+                condition=Q(
+                    Q(status=CheckStatus.PROCESSING)
+                ),
+                name='unique_processing_check_per_user'
+            ),
+        ]
 
     def __str__(self):
         return str(self.identifier)
@@ -691,10 +709,10 @@ class Check(DateModel):
         """
 
         if not self.onfido_id:
-            raise Exception("Improperly configured check.")
+            raise CheckProcessingError("Improperly configured check.")
 
         if not self.user.company.configured:
-            raise Exception("Improperly configured company.")
+            raise CheckProcessingError("Improperly configured company.")
 
         onfido_api = onfido.Api(
             self.user.company.onfido_api_key, region=Region.EU
@@ -709,10 +727,10 @@ class Check(DateModel):
         """
 
         if not self.onfido_id:
-            raise Exception("Improperly configured check.")
+            raise CheckProcessingError("Improperly configured check.")
 
         if not self.user.company.configured:
-            raise Exception("Improperly configured company.")
+            raise CheckProcessingError("Improperly configured company.")
 
         onfido_api = onfido.Api(
             self.user.company.onfido_api_key, region=Region.EU
@@ -745,10 +763,14 @@ class Check(DateModel):
         """
 
         if self.onfido_id:
-            raise Exception("Check has already been generated.")
+            return
 
         if not self.user.company.configured:
-            raise Exception("Improperly configured company.")
+            raise CheckProcessingError("Improperly configured company.")
+
+        # Lock on the user to ensure only a single check per user can have
+        # onfido resources generated at a time.
+        user = User.objects.select_for_update().get(id=self.user.id)
 
         # Change status of this check
         self.status = CheckStatus.PROCESSING
@@ -782,17 +804,21 @@ class Check(DateModel):
         Evaluates each related check report to see if the platform needs updates.
         """
 
-        if self.status == CheckStatus.COMPLETE:
+        if self.status in (CheckStatus.COMPLETE, CheckStatus.FAILED,):
             raise Exception("Check has already been evaluated.")
+
+        # Lock on the user to ensure only a single check per user can be
+        # evaluated at a time.
+        user = User.objects.select_for_update().get(id=self.user.id)
 
         # Retrieve an onfido check resource.
         onfido_check = self.onfido_resource
 
         # Check whether the check is ready for evaluation.
-        if onfido_check["status"] in ("complete", "withdrawn"):
+        if onfido_check["status"] in ("complete", "withdrawn",):
             self.status = CheckStatus.COMPLETE
         else:
-            raise Exception("Check is notready to be evaluated.")
+            raise CheckProcessingError("Check is not ready to be evaluated.")
 
         # Retrieve a list of reports for the check.
         onfido_reports = self.onfido_report_resources

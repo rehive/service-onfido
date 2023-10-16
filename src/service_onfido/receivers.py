@@ -15,23 +15,38 @@ def document_post_save(sender, instance, created, **kwargs):
     if kwargs.get('raw', False):
         return
 
-    # if created:
-    #     instance.generate_async()
+    if created:
+        instance.generate_async()
 
 
-# @receiver(m2m_changed, sender=Check.documents.through)
-# def check_documents_post_save(
-#         sender, instance, action, reverse, pk_set, **kwargs):
-#     """
-#     Fire off functionality when a document is saved on a check.
-#     """
+@receiver(post_save, sender=Check)
+def check_post_save(sender, instance, created, **kwargs):
+    """
+    Fire off functionality when a check is saved.
+    """
 
-#     # No need to synchronize on fixture load.
-#     if kwargs.get('raw', False):
-#         return
+    # Only pending, complete or failed checks are evaluated.
+    if instance.status not in (
+                CheckStatus.PENDING, CheckStatus.COMPLETE, CheckStatus.FAILED
+            ):
+        return
 
-#     if len(pk_set) == 0:
-#         return
+    # Get the first check that is currently processing.
+    processing_check = Check.objects.filter(
+        status=CheckStatus.PROCESSING,
+        user=check.user
+    ).order_by("created").first()
 
-#     if action == "post_add":
-#         instance.do_thing()
+    # Get the next pending check (the one that must be processed next).
+    next_pending_check = Check.objects.filter(
+        status=CheckStatus.PENDING,
+        user=check.user
+    ).order_by("created").first()
+
+    # There is an already processing check.
+    # OR there is no next pending check to process.
+    if processing_check or not next_pending_check:
+        return
+
+    # Generate the onfido resource (transitions the check to processing).
+    next_pending_check.generate_async()
