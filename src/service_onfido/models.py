@@ -21,6 +21,7 @@ from django.contrib.postgres.fields import ArrayField
 from django_rehive_extras.models import DateModel, StateModel
 from django.utils.functional import cached_property
 from django.core.files.uploadedfile import InMemoryUploadedFile
+from rest_framework import status
 
 from config import settings
 from service_onfido.exceptions import (
@@ -209,11 +210,11 @@ class User(DateModel):
         onfido_api = onfido.Api(self.company.onfido_api_key, region=Region.EU)
 
         # Create customer on onfido.
-        applicant = api.applicant.create({
+        applicant = onfido_api.applicant.create({
             # TODO : Populate with the correct values.
             # Can default to dummy values as well.
-            "first_name": "",
-            "last_name": "",
+            "first_name": "PLACEHOLDER",
+            "last_name": "PLACEHOLDER",
             #"dob": "1984-01-01",
             #"address": {}
         })
@@ -241,7 +242,7 @@ class User(DateModel):
 
         rehive = Rehive(self.company.admin.token)
 
-        rehive.admin.users.patch(self.identifier, **data)
+        rehive.admin.users.patch(str(self.identifier), **data)
 
 
 class PlatformWebhook(DateModel):
@@ -548,7 +549,10 @@ class Document(DateModel):
             raise DocumentProcessingError("Improperly configured company.")
 
         # Retrieve a file object using the Rehive resource URL.
-        res = requests.get(self.platform_resource["file"], stream=True)
+        file_url = self.platform_resource["file"]
+        # TODO : Use for local testing:
+        # file_url = "https://storage.googleapis.com/platform-storage/companies/647/logos/fe655812b31f43569160430bdcc24d1b_1610122812.png"
+        res = requests.get(file_url, stream=True)
         if res.status_code != status.HTTP_200_OK:
             raise DocumentProcessingError("Invalid document file.")
 
@@ -558,7 +562,7 @@ class Document(DateModel):
             InMemoryUploadedFile(
                 BytesIO(res.content),
                 '',
-                os.path.basename(self.platform_resource["file"]),
+                os.path.basename(file_url),
                 content_type,
                 len(res.content),
                 'utf8'
@@ -568,11 +572,15 @@ class Document(DateModel):
         # Generate ondifo document data.
         data = {
             "applicant_id": self.user.onfido_id,
-            "type": str(self.type.onfido_type)
+            "type": self.type.onfido_type.value
         }
         # If the side is defined on the document add it to the `data`.
         if self.type.side:
-            data["side"] = str(self.type.side)
+            data["side"] = self.type.side.value
+
+        onfido_api = onfido.Api(
+            self.user.company.onfido_api_key, region=Region.EU
+        )
 
         # Upload the document to the Onfido servers.
         onfido_document = onfido_api.document.upload(file, data)
@@ -676,7 +684,7 @@ class Check(DateModel):
         related_name='documents',
         on_delete=models.CASCADE
     )
-    onfido_id = models.CharField(max_length=64)
+    onfido_id = models.CharField(max_length=64, null=True, blank=True)
     # List of documents that should be reported on.
     # FUTURE : Do we want to limit the number of documents accepted.
     documents = models.ManyToManyField('service_onfido.Document')
@@ -736,7 +744,7 @@ class Check(DateModel):
             self.user.company.onfido_api_key, region=Region.EU
         )
 
-        return onfido_api.report.all(self.onfido_id)
+        return onfido_api.report.all(self.onfido_id)["reports"]
 
     def generate_async(self):
         """
@@ -757,6 +765,7 @@ class Check(DateModel):
 
         self.generate_onfido_resource()
 
+    @transaction.atomic
     def generate_onfido_resource(self):
         """
         Generate the onfido resources for this check.
@@ -781,7 +790,7 @@ class Check(DateModel):
         )
 
         # Generate the check.
-        check = api.check.create({
+        check = onfido_api.check.create({
             "applicant_id": self.user.onfido_id,
             "report_names": ["document"],
             "document_ids": [d.onfido_id for d in self.documents.all()]
@@ -797,6 +806,7 @@ class Check(DateModel):
 
         tasks.evaluate_check.delay(self.id)
 
+    @transaction.atomic
     def evaluate(self):
         """
         Evaluate a check.
@@ -825,13 +835,13 @@ class Check(DateModel):
 
         # Iterate through document reports and set a document_status.
         platform_document_status = None
-        for report in [r for r in reports if r["name"] == "document"]:
+        for report in [r for r in onfido_reports if r["name"] == "document"]:
             # If the report is complete fetch the sub_result
             if report["status"] == "complete":
                 # Fetch a platform status for the report result.
                 platform_document_status = OnfidoDocumentReportResult(
                     report["sub_result"]
-                ).get_platform_document_status()
+                ).platform_document_status
 
         # Apply document status changes to all related documents.
         if platform_document_status:
@@ -842,7 +852,7 @@ class Check(DateModel):
                     }
                 }
                 d.update_platform_resource({
-                    "status": platform_document_status,
+                    "status": platform_document_status.value,
                     "metadata": metadata
                 })
 
