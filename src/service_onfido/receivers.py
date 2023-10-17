@@ -34,13 +34,13 @@ def check_post_save(sender, instance, created, **kwargs):
     # Get the first check that is currently processing.
     processing_check = Check.objects.filter(
         status=CheckStatus.PROCESSING,
-        user=check.user
+        user=instance.user
     ).order_by("created").first()
 
     # Get the next pending check (the one that must be processed next).
     next_pending_check = Check.objects.filter(
         status=CheckStatus.PENDING,
-        user=check.user
+        user=instance.user
     ).order_by("created").first()
 
     # There is an already processing check.

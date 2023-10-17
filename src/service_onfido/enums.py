@@ -55,8 +55,8 @@ class OnfidoDocumentReportResult(Enum):
     SUSPECTED = 'suspected'
     CAUTION = 'caution'
 
-    @staticmethod
-    def get_platform_document_status(enum):
+    @property
+    def platform_document_status(self):
         """
         Map a onfido report result to a platform status.
         """
