@@ -1,6 +1,6 @@
 # Onfido Service
 
-A service to handle Onfido KYC.
+A service to handle Onfido KYC. An overview of the implementation can be found [here](https://github.com/rehive/service-onfido/wiki/Overview).
 
 Requires the following permissions in Rehive:
 
