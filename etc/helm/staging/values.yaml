@@ -52,9 +52,6 @@ service:
     periodSeconds: 10
     timeoutSeconds: 2
   type: NodePort
-gcloudCredentials:
-  enabled: true
-  kubernetesSecret: google-credentials-media
 redis:
   enabled: false
 workers:

@@ -64,13 +64,6 @@ service:
     periodSeconds: 10
     timeoutSeconds: 2
   type: NodePort
-serviceAccount:
-  create: true
-  annotations: 
-    iam.gke.io/gcp-service-account: "service-onfido-media@rehive-services.iam.gserviceaccount.com"
-gcloudCredentials:
-  enabled: true
-  kubernetesSecret: google-credentials-media
 redis:
   enabled: false
 workers:
@@ -100,4 +93,3 @@ workers:
       limits:
         cpu: 66m
         memory: 256M
-
