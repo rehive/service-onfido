@@ -15,7 +15,7 @@ django-healthz==0.0.5
 django-rehive-extras==1.1.2
 drf-rehive-extras==2.1.0
 drf-spectacular[sidecar]==0.26.3
-gunicorn==20.1.0
+gunicorn==22.0.0
 requests==2.31.0
 psycopg2-binary==2.9.3
 rehive==1.2.19
