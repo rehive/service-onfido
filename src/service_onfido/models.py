@@ -114,7 +114,10 @@ class Company(DateModel, StateModel):
         # Create the required webhook on Onfido.
         webhook = onfido_api.webhook.create(
             {
-                "url": getattr(settings, 'BASE_URL') + 'onfido/webhook/',
+                "url": "{}onfido/webhook/{}/".format(
+                    getattr(settings, 'BASE_URL'),
+                    self.identifier
+                ),
                 "events": [
                     "check.withdrawn",
                     "check.completed"
