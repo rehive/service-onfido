@@ -82,10 +82,7 @@ def generate_user(self, user_id):
         logger.error('User does not exist.')
         return
 
-    try:
-        user.generate()
-    except Exception as exc:
-        logger.exception(exc)
+    user.generate()
 
 
 @shared_task(
@@ -107,10 +104,7 @@ def generate_document(self, document_id):
         logger.error('Document does not exist.')
         return
 
-    try:
-        document.generate()
-    except Exception as exc:
-        logger.exception(exc)
+    document.generate()
 
 
 @shared_task(
@@ -132,10 +126,7 @@ def generate_check(self, check_id):
         logger.error('Check does not exist.')
         return
 
-    try:
-        check.generate()
-    except Exception as exc:
-        logger.exception(exc)
+    check.generate()
 
 
 @shared_task(
@@ -157,7 +148,4 @@ def evaluate_check(self, check_id):
         logger.error('Check does not exist.')
         return
 
-    try:
-        check.evaluate()
-    except Exception as exc:
-        logger.exception(exc)
+    check.evaluate()
