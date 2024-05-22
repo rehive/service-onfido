@@ -553,24 +553,14 @@ class Document(DateModel):
 
         # Retrieve a file object using the Rehive resource URL.
         file_url = self.platform_resource["file"]
-        # TODO : Use for local testing:
-        # file_url = "https://storage.googleapis.com/platform-storage/companies/647/logos/fe655812b31f43569160430bdcc24d1b_1610122812.png"
         res = requests.get(file_url, stream=True)
         if res.status_code != status.HTTP_200_OK:
             raise DocumentProcessingError("Invalid document file.")
 
-        # Convert the file into an in-memory upload file.
-        content_type = res.headers.get('content-type', 'image/png')
-        file = BufferedReader(
-            InMemoryUploadedFile(
-                BytesIO(res.content),
-                '',
-                os.path.basename(file_url),
-                content_type,
-                len(res.content),
-                'utf8'
-            )
-        )
+        # Convert the bytes into a file.
+        file = BytesIO(res.content)
+        file.name = os.path.basename(file_url).split("?")[0]
+        file.seek(0)
 
         # Generate ondifo document data.
         data = {
@@ -590,6 +580,7 @@ class Document(DateModel):
 
         # Record the onfido ID on this object.
         self.onfido_id = onfido_document["id"]
+        self.save()
 
         # Create a check
         self.attach_to_check()
@@ -633,6 +624,9 @@ class Document(DateModel):
         # Add to a check.
         # If this is a multi-side document.
         if self.type.side:
+            # TODO : Generate the other side handling
+            other_side = ""
+
             # Try and get a check containing a document of the same onfido
             # type but a different side.
             try:
