@@ -232,7 +232,7 @@ class WebhookSerializer(serializers.Serializer):
 
 
 class OnfidoWebhookSerializer(serializers.Serializer):
-    payload = serializers.JSONField()
+    payload = serializers.JSONField(required=False)
 
     def validate(self, validated_data):
         # Get the payload so we can find the correct secret tooken for the

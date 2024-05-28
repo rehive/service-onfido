@@ -8,6 +8,7 @@ from rest_framework.parsers import BaseParser, ParseError
 from rest_framework.renderers import JSONRenderer
 from drf_rehive_extras.generics import *
 from drf_rehive_extras.serializers import ActionResponseSerializer
+from django.conf import settings as django_settings
 
 from config import settings
 from service_onfido.authentication import *
@@ -28,8 +29,11 @@ class RawJSONParser(BaseParser):
 
     def parse(self, stream, media_type=None, parser_context=None):
         parser_context = parser_context or {}
-        encoding = parser_context.get('encoding', settings.DEFAULT_CHARSET)
+        encoding = parser_context.get(
+            'encoding', django_settings.DEFAULT_CHARSET
+        )
         request = parser_context.get('request')
+
         try:
             data = stream.read().decode(encoding)
             # setting a 'body' alike custom attr with raw POST content
