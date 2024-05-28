@@ -347,7 +347,7 @@ class OnfidoWebhook(DateModel):
                 # Try and get a check in the service database.
                 try:
                     check = Check.objects.get(
-                        onfido_id=payload["object"]["id"],
+                        onfido_id=self.payload["object"]["id"],
                         user__company=self.company
                     )
                 except Check.DoesNotExist:
