@@ -14,7 +14,9 @@ from config import settings
 from service_onfido.enums import (
     WebhookEvent, OnfidoDocumentType, DocumentTypeSide
 )
-from service_onfido.models import Company, User, DocumentType, PlatformWebhook
+from service_onfido.models import (
+    Company, User, DocumentType, PlatformWebhook, OnfidoWebhook
+)
 from service_onfido.authentication import HeaderAuthentication
 
 from logging import getLogger
