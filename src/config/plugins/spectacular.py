@@ -19,7 +19,7 @@ SPECTACULAR_SETTINGS = {
     # List of servers.
     'SERVERS': [
         {"url": os.environ.get(
-            'BASE_URL', "https://onfido.services.rehive.io"
+            'BASE_URL', "https://onfido.services.rehive.com"
         )}
     ],
 
