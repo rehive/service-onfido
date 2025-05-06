@@ -5,7 +5,7 @@ kombu==5.2.2
 msgpack==1.0.3
 Pillow==10.3.0
 gcloud==0.18.3
-Django==4.1.13
+Django==4.2.20
 django-storages[google]==1.12.3
 django-cors-headers==3.11.0
 djangorestframework==3.13.1
