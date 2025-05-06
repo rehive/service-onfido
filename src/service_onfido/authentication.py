@@ -65,20 +65,29 @@ class RehiveAuthentication(HeaderAuthentication):
         except AttributeError:
             status_code = None
 
-        # Raise the error as is, if it has un unexpected error status.
-        if (not status_code or status_code not in (
+        # Handle 429 throttling errors.
+        if status_code == status.HTTP_429_TOO_MANY_REQUESTS:
+            try:
+                wait = int(exc.result.headers['Retry-After'])
+            except (AttributeError, TypeError, KeyError):
+                wait = None
+            raise exceptions.Throttled(wait=wait)
+
+        # Handle other unexpected errors (raise a 500 error).
+        elif (not status_code or status_code not in (
                     status.HTTP_400_BAD_REQUEST,
-                    status.HTTP_401_UNAUTHORIZED,
                     status.HTTP_403_FORBIDDEN,
+                    status.HTTP_401_UNAUTHORIZED,
                 )):
             raise exc
 
-        # Otherwise try and get the data and message from the error.
+        # Otherwise try and get data from the exception (if it exists).
         try:
             data = exc.data['data']
         except (AttributeError, TypeError, KeyError):
             data = None
 
+        # Otherwise try and get a message from the exception (if it exists).
         try:
             message = exc.data['message']
         except (AttributeError, TypeError, KeyError):
