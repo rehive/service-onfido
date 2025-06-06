@@ -18,7 +18,7 @@ drf-spectacular[sidecar]==0.26.3
 gunicorn==23.0.0
 requests==2.32.0
 psycopg2-binary==2.9.3
-rehive==1.3.6
+rehive==1.3.7
 sentry-sdk==2.8.0
 vine==5.0.0
 onfido-python==2.7.0
